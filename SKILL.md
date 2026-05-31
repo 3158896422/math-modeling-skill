@@ -48,7 +48,7 @@ description: 本技能应在用户要求"数学建模"、"建模比赛"、"数�
 **⚠️ 执行前提（必须最先执行）**：
 
 在开始建模分析之前，**必须先读取**角色指导文档：
-- `references/roles/建模手说明.md` - 详细的建模分析工作流程、模型选择原则、注意事项
+- `references/roles/建模手/SKILL.md` - 详细的建模分析工作流程、模型选择原则、注意事项
 
 **执行任务**：分析题目，确定数学模型，产出分析文档。
 
@@ -71,7 +71,7 @@ description: 本技能应在用户要求"数学建模"、"建模比赛"、"数�
 **⚠️ 执行前提（必须最先执行）**：
 
 在开始代码实现之前，**必须先读取**角色指导文档：
-- `references/roles/编程手说明.md` - 详细的代码实现工作流程、代码规范、可视化要求
+- `references/roles/编程手/SKILL.md` - 详细的代码实现工作流程、代码规范、可视化要求
 
 **执行任务**：根据题目原文和建模阶段产出的文档，编写解题代码并生成结果。
 
@@ -80,7 +80,7 @@ description: 本技能应在用户要求"数学建模"、"建模比赛"、"数�
 - 确认用户指定的编程语言（Python、MATLAB等）
 - 按每道题目分开编写结构清晰的代码
 - 运行代码并将结果写入表格（保持表格原有结构）
-- 绘制符合SCI/Nature风格的精美图表进行数据可视化
+- 绘制符合SCI/Nature标准的精美图表进行数据可视化（Figure Contract + 语义调色板 + SVG/PNG双格式）
 - 创建README文档说明项目
 
 **产出文件**：
@@ -88,21 +88,21 @@ description: 本技能应在用户要求"数学建模"、"建模比赛"、"数�
 - `问题X_求解.py`（或其他语言）- 各题目的解题代码
 - `结果表格.csv` - 计算结果
 - `README.md` - 项目说明文档
-- 生成的可视化图表
+- 生成的可视化图表（SVG可编辑矢量 + PNG高分辨率 + HTML导航面板）
 
 ### 第三阶段：论文撰写
 
 **⚠️ 执行前提（必须最先执行）**：
 
 在开始论文撰写之前，**必须先读取**角色指导文档：
-- `references/roles/论文手说明.md` - 详细的论文撰写工作流程、论文模板、撰写规范
+- `references/roles/论文手/SKILL.md` - 详细的论文撰写工作流程、论文模板、撰写规范
 
 **执行任务**：根据题目原文、建模分析和代码实现的产出，撰写完整论文。
 
 执行步骤：
 
 - 检查用户是否提供论文模板
-- 使用默认模板（`references/论文模板.docx`）或用户模板撰写论文
+- 使用默认模板（`references/roles/论文手/references/论文模板.docx`）或用户模板撰写论文
 - 使用 docx skill 生成标准的 .docx 格式论文
 - 避免死板罗列，使用段落式自然陈述
 - 完成所有标准章节
@@ -131,13 +131,27 @@ description: 本技能应在用户要求"数学建模"、"建模比赛"、"数�
 
 各阶段的详细工作指南：
 
-- **`references/roles/建模手说明.md`** - 建模分析阶段工作细则、模型选择原则、注意事项
-- **`references/roles/编程手说明.md`** - 代码实现阶段工作细则、代码规范、可视化要求
-- **`references/roles/论文手说明.md`** - 论文撰写阶段工作细则、论文模板、撰写规范
+- **`references/roles/建模手/SKILL.md`** - 建模分析阶段入口，包含核心职责、工具速查
+- **`references/roles/建模手/references/前置合同.md`** - Model Contract 前置规划框架
+- **`references/roles/建模手/references/工作流程.md`** - 分析流程、模型选择、文档模板
+- **`references/roles/建模手/references/质检清单.md`** - 交付前 QA 检查清单
+- **`references/roles/建模手/references/建模设计理论.md`** - 建模设计理论：模型选择、复杂度控制、组合策略与证据层次
+- **`references/roles/编程手/SKILL.md`** - 代码实现阶段入口，包含核心职责、工具速查
+- **`references/roles/编程手/references/工作流程.md`** - 工作流程、代码规范、文件结构、结果输出
+- **`references/roles/编程手/references/可视化规范.md`** - Figure Contract、调色板、SVG导出、HTML面板
+- **`references/roles/编程手/references/质检清单.md`** - 交付前 QA 检查清单
+- **`references/roles/论文手/SKILL.md`** - 论文撰写阶段入口，包含核心职责、工具速查、国赛vs美赛差异
+- **`references/roles/论文手/references/工作流程.md`** - 论证构建、Claim-Evidence映射、撰写流程
+- **`references/roles/论文手/references/章节模板.md`** - 摘要/引言/结果/讨论等章节架构模式
+- **`references/roles/论文手/references/写作规范.md`** - 人称约束、叙述方式、去AI味指南
+- **`references/roles/论文手/references/进阶技巧.md`** - 段落流检查、动词校准（美赛专用）
+- **`references/roles/论文手/references/自审框架.md`** - 交付前系统性自审（四轮审查框架）
+- **`references/roles/论文手/references/英文化工作流.md`** - 美赛专用：中文→英文三阶段转换流程
 
 ### 论文模板
 
-- **`references/论文模板.docx`** - 标准数学建模论文模板（.docx格式）
+- **`references/roles/论文手/references/论文模板.docx`** - 标准数学建模论文模板（.docx格式）
+- **`references/roles/论文手/references/默认论文模板.md`** - 标准数学建模论文模板（Markdown版，含章节结构说明）
 
 ### 优秀论文资源库
 
@@ -221,10 +235,11 @@ description: 本技能应在用户要求"数学建模"、"建模比赛"、"数�
 ## 使用建议
 
 1. **按顺序执行各阶段**：建模分析 → 代码实现 → 论文撰写，确保信息正确传递
+2. **渐进式加载角色文档**：每个阶段开始时加载对应 `references/roles/` 下的子 Skill 入口文件，详细引用按需加载，避免一次性加载全部内容
 2. **保持文件组织**：为每个建模项目创建独立文件夹
 3. **术语一致性**：建模分析阶段创建的术语表格应被后续阶段使用
 4. **模型选择原则**：优先选择高效、快速、准确的模型，谨慎使用神经网络等复杂模型
-5. **可视化质量**：代码实现阶段绘制的图表应符合学术出版标准
+5. **可视化质量**：代码实现阶段绘制的图表应符合 SCI/Nature 学术出版标准，采用绘图前规划（Figure Contract）、语义调色板、无网格线精简坐标轴等规范，详见 `references/roles/编程手/references/可视化规范.md`
 
 ## 典型使用场景
 

@@ -231,6 +231,61 @@ new Paragraph({
 })
 ```
 
+### Equations / Math Formulas
+
+The `npm docx` package does not natively support mathematical equations. Use the Python post-processing script to insert proper Word equations (OMML format) into generated .docx files. Equations will be editable in Word.
+
+**Method 1 — Replace placeholders in existing .docx (推荐):**
+
+```bash
+# 安装依赖
+pip install latex2mathml lxml python-docx
+
+# 单条公式替换
+python scripts/equations.py replace paper.docx ^
+    --replace "EQ_LOSS" "\\min L(\\theta) = \\frac{1}{n}\\sum_{i=1}^{n} (y_i - \\hat{y}_i)^2" ^
+    --replace "EQ_CONSTRAINT" "\\sum_{j=1}^{m} a_{ij}x_j \\leq b_i, \\quad i=1,\\ldots,p" ^
+    -o paper_final.docx
+
+# 批量替换（从 JSON 文件）
+python scripts/equations.py replace paper.docx --mapping equations.json -o paper_final.docx
+```
+
+JSON 映射文件格式:
+```json
+{
+    "EQ_LOSS": "\\min L(\\theta) = \\frac{1}{n}\\sum_{i=1}^{n} (y_i - \\hat{y}_i)^2",
+    "EQ_CONSTRAINT": "\\sum_{j=1}^{m} a_{ij}x_j \\leq b_i, \\quad i=1,\\ldots,p"
+}
+```
+
+**Method 2 — 从 Markdown 生成 (pandoc 后端):**
+
+先用 Markdown 写论文（用 `$$...$$` 或 `$...$` 写公式），再一键转换为 .docx，pandoc 会自动将 LaTeX 方程转为 Word OMML 公式。
+
+```bash
+# 需要安装 pandoc: https://pandoc.org/installing.html
+python scripts/equations.py generate paper.md -o paper.docx --template template.docx
+```
+
+在 Markdown 中写公式:
+```markdown
+损失函数定义为：
+
+$$
+\min L(\theta) = \frac{1}{n}\sum_{i=1}^{n} (y_i - \hat{y}_i)^2
+$$
+
+其中 $y_i$ 为真实值，$\hat{y}_i$ 为预测值。
+```
+
+**Preview MathML output (debug):**
+```bash
+python scripts/equations.py replace dummy.docx --replace "x" "E = mc^2" --show-mathml
+```
+
+---
+
 ### Page Breaks
 
 ```javascript
@@ -475,7 +530,10 @@ After running `comment.py` (see Step 2), add markers to document.xml. For replie
 
 ## Dependencies
 
-- **pandoc**: Text extraction
+- **pandoc**: Text extraction, Markdown→docx equation conversion
 - **docx**: `npm install -g docx` (new documents)
 - **LibreOffice**: PDF conversion (auto-configured for sandboxed environments via `scripts/office/soffice.py`)
 - **Poppler**: `pdftoppm` for images
+- **latex2mathml**: `pip install latex2mathml` (equation conversion, auto-installed if missing)
+- **python-docx**: `pip install python-docx` (docx manipulation with equation support)
+- **lxml**: `pip install lxml` (XML processing for equation insertion)
