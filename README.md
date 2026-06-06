@@ -318,28 +318,28 @@ math-modeling-skill/
 
 以下图表为采用本技能可视化规范生成的 **2025 年国赛（CUMCM）** 实际参赛作品示例，展示了 Figure Contract 规划下的 SCI/Nature 级图表输出效果。
 
-### 2025 年国赛 A 题 — 土壤重金属检测（光谱分析）
+### 2025 年国赛 A 题 — 烟幕干扰弹的投放策略
 
 <div align="center">
   <img src="imgs/2025-国赛-A题示例1.svg" alt="国赛A题示例1" width="90%">
   <br>
-  <em>原始数据光谱预处理 + 特征波段选择结果（双子图布局）</em>
+  <em>烟幕干扰弹投放方案对比 + 关键参数敏感性分析（双子图布局）</em>
   <br><br>
   <img src="imgs/2025-国赛-A题示例2.svg" alt="国赛A题示例2" width="90%">
   <br>
-  <em>模型预测结果与误差分析（GridSpec 不对称布局）</em>
+  <em>多目标优化 Pareto 前沿 + 不同策略效果对比（GridSpec 不对称布局）</em>
 </div>
 
-### 2025 年国赛 B 题 — 微塑料红外光谱识别
+### 2025 年国赛 B 题 — 碳化硅外延层厚度的确定
 
 <div align="center">
   <img src="imgs/2025-国赛-B题示例1.svg" alt="国赛B题示例1" width="90%">
   <br>
-  <em>不同方法分类准确率对比 + 光谱特征可视化（双子图 a, b 面板标签）</em>
+  <em>外延层厚度拟合结果 + 不同方法预测精度对比（双子图 a, b 面板标签）</em>
   <br><br>
   <img src="imgs/2025-国赛-B题示例2.svg" alt="国赛B题示例2" width="90%">
   <br>
-  <em>识别结果的混淆矩阵热力图 + ROC 曲线分析</em>
+  <em>模型预测误差分布 + 实测值与预测值一致性分析</em>
 </div>
 
 ## 🏆 适配竞赛
@@ -546,6 +546,16 @@ references/roles/
 - 🔄 基础三阶段工作流程：建模分析 → 代码实现 → 论文撰写
 - 📚 7大类60+算法资源库
 - 👥 基础角色分工文档
+
+---
+
+## ⭐ GitHub Star 历史
+
+<div align="center">
+
+[![Star History Chart](https://api.star-history.com/svg?repos=XiaoMaColtAI/math-modeling-skill&type=Date)](https://star-history.com/#XiaoMaColtAI/math-modeling-skill&Date)
+
+</div>
 
 ---
 
