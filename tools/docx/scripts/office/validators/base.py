@@ -91,6 +91,33 @@ class BaseSchemaValidator:
         "http://www.w3.org/XML/1998/namespace",
     }
 
+    W_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+    WORD_STYLE_CHILD_ORDER = {
+        "name": 0,
+        "aliases": 1,
+        "basedOn": 2,
+        "next": 3,
+        "link": 4,
+        "autoRedefine": 5,
+        "hidden": 6,
+        "uiPriority": 7,
+        "semiHidden": 8,
+        "unhideWhenUsed": 9,
+        "qFormat": 10,
+        "locked": 11,
+        "personal": 12,
+        "personalCompose": 13,
+        "personalReply": 14,
+        "rsid": 15,
+        "pPr": 16,
+        "rPr": 17,
+        "tblPr": 18,
+        "trPr": 19,
+        "tcPr": 20,
+        "tblStylePr": 21,
+    }
+
     def __init__(self, unpacked_dir, original_file=None, verbose=False):
         self.unpacked_dir = Path(unpacked_dir).resolve()
         self.original_file = Path(original_file) if original_file else None
@@ -110,7 +137,58 @@ class BaseSchemaValidator:
         raise NotImplementedError("Subclasses must implement the validate method")
 
     def repair(self) -> int:
-        return self.repair_whitespace_preservation()
+        return (
+            self.repair_whitespace_preservation()
+            + self.repair_word_style_child_order()
+        )
+
+    def repair_word_style_child_order(self) -> int:
+        styles_file = self.unpacked_dir / "word" / "styles.xml"
+        if not styles_file.exists():
+            return 0
+
+        parser = lxml.etree.XMLParser(remove_blank_text=False)
+        try:
+            tree = lxml.etree.parse(str(styles_file), parser)
+        except Exception:
+            return 0
+
+        repairs = self._normalize_word_style_child_order(tree)
+
+        if repairs:
+            tree.write(
+                str(styles_file),
+                encoding="UTF-8",
+                xml_declaration=True,
+                standalone=False,
+            )
+            print(f"  Repaired: styles.xml: reordered {repairs} style definition(s)")
+
+        return repairs
+
+    def _normalize_word_style_child_order(self, tree) -> int:
+        repairs = 0
+        for style in tree.findall(f".//{{{self.W_NAMESPACE}}}style"):
+            children = list(style)
+
+            def rank(item):
+                index, elem = item
+                if elem.tag.startswith(f"{{{self.W_NAMESPACE}}}"):
+                    local_name = elem.tag.rsplit("}", 1)[1]
+                    return self.WORD_STYLE_CHILD_ORDER.get(local_name, 1000), index
+                return 1000, index
+
+            sorted_children = [elem for _, elem in sorted(enumerate(children), key=rank)]
+            if children == sorted_children:
+                continue
+
+            for child in children:
+                style.remove(child)
+            for child in sorted_children:
+                style.append(child)
+            repairs += 1
+
+        return repairs
 
     def repair_whitespace_preservation(self) -> int:
         repairs = 0
@@ -760,13 +838,16 @@ class BaseSchemaValidator:
                 )
                 schema = lxml.etree.XMLSchema(xsd_doc)
 
-            with open(xml_file, "r") as f:
+            with open(xml_file, "rb") as f:
                 xml_doc = lxml.etree.parse(f)
 
             xml_doc, _ = self._remove_template_tags_from_text_nodes(xml_doc)
             xml_doc = self._preprocess_for_mc_ignorable(xml_doc)
 
             relative_path = xml_file.relative_to(base_path)
+            if relative_path.as_posix() == "word/styles.xml":
+                self._normalize_word_style_child_order(xml_doc)
+
             if (
                 relative_path.parts
                 and relative_path.parts[0] in self.MAIN_CONTENT_FOLDERS

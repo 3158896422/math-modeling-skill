@@ -5,10 +5,10 @@ LaTeX 方程 → Word OMML 公式转换工具
 将 .docx 文档中的 LaTeX 占位符替换为 Word 原生的数学公式（OMML 格式），
 使得公式在 Word 中可编辑、可渲染，而非显示为纯文本 LaTeX 代码。
 
-流程: LaTeX → MathML → OMML → 插入 docx
+流程: LaTeX 子集 → OMML → 插入 docx
 
 依赖:
-    pip install latex2mathml lxml python-docx
+    pip install lxml python-docx
 
 用法:
     # 单个公式替换
@@ -24,8 +24,8 @@ LaTeX 方程 → Word OMML 公式转换工具
 """
 
 import argparse
+import copy
 import json
-import re
 import subprocess
 import sys
 import tempfile
@@ -34,73 +34,308 @@ from xml.etree import ElementTree as ET
 
 try:
     from docx import Document
-    from docx.oxml import OxmlElement, qn
-    from docx.oxml.ns import nsmap
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import nsmap, qn
     from lxml import etree
 except ImportError:
     print("错误: 请先安装依赖: pip install python-docx lxml", file=sys.stderr)
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# OMML / MathML 命名空间
+# OMML 命名空间
 # ---------------------------------------------------------------------------
 OMML_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 OMML_PREFIX = "m"
-MATHML_NS = "http://www.w3.org/1998/Math/MathML"
 
 # 注册命名空间前缀，保证序列化干净
 ET.register_namespace(OMML_PREFIX, OMML_NS)
-ET.register_namespace("", MATHML_NS)
+
+LATEX_SYMBOLS = {
+    "alpha": "α",
+    "beta": "β",
+    "gamma": "γ",
+    "delta": "δ",
+    "epsilon": "ε",
+    "varepsilon": "ε",
+    "theta": "θ",
+    "lambda": "λ",
+    "mu": "μ",
+    "pi": "π",
+    "rho": "ρ",
+    "sigma": "σ",
+    "tau": "τ",
+    "phi": "φ",
+    "varphi": "φ",
+    "omega": "ω",
+    "Gamma": "Γ",
+    "Delta": "Δ",
+    "Theta": "Θ",
+    "Lambda": "Λ",
+    "Pi": "Π",
+    "Sigma": "Σ",
+    "Phi": "Φ",
+    "Omega": "Ω",
+    "sum": "∑",
+    "prod": "∏",
+    "int": "∫",
+    "le": "≤",
+    "leq": "≤",
+    "ge": "≥",
+    "geq": "≥",
+    "neq": "≠",
+    "ne": "≠",
+    "approx": "≈",
+    "infty": "∞",
+    "times": "×",
+    "cdot": "·",
+    "pm": "±",
+    "mp": "∓",
+    "to": "→",
+    "rightarrow": "→",
+    "leftarrow": "←",
+    "in": "∈",
+    "notin": "∉",
+    "subset": "⊂",
+    "subseteq": "⊆",
+    "cup": "∪",
+    "cap": "∩",
+}
+
+
+def m_element(local_name, text=None):
+    elem = etree.Element(f"{{{OMML_NS}}}{local_name}")
+    if text is not None:
+        elem.text = text
+    return elem
+
+
+def omml_run(text):
+    run = m_element("r")
+    text_elem = m_element("t", text)
+    if text.startswith((" ", "\t")) or text.endswith((" ", "\t")):
+        text_elem.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    run.append(text_elem)
+    return run
+
+
+def append_group(parent, children):
+    for child in children:
+        parent.append(child)
+
+
+def fraction_element(num_children, den_children):
+    frac = m_element("f")
+    num = m_element("num")
+    den = m_element("den")
+    append_group(num, num_children)
+    append_group(den, den_children)
+    frac.extend([num, den])
+    return frac
+
+
+def radical_element(children):
+    rad = m_element("rad")
+    rad_pr = m_element("radPr")
+    deg_hide = m_element("degHide")
+    deg_hide.set(f"{{{OMML_NS}}}val", "1")
+    rad_pr.append(deg_hide)
+    deg = m_element("deg")
+    elem = m_element("e")
+    append_group(elem, children)
+    rad.extend([rad_pr, deg, elem])
+    return rad
+
+
+def accent_element(children, accent):
+    acc = m_element("acc")
+    acc_pr = m_element("accPr")
+    chr_elem = m_element("chr")
+    chr_elem.set(f"{{{OMML_NS}}}val", accent)
+    acc_pr.append(chr_elem)
+    elem = m_element("e")
+    append_group(elem, children)
+    acc.extend([acc_pr, elem])
+    return acc
+
+
+def script_element(base_children, sub_children=None, sup_children=None):
+    if sub_children and sup_children:
+        node = m_element("sSubSup")
+        base = m_element("e")
+        sub = m_element("sub")
+        sup = m_element("sup")
+        append_group(base, base_children)
+        append_group(sub, sub_children)
+        append_group(sup, sup_children)
+        node.extend([base, sub, sup])
+        return node
+    if sub_children:
+        node = m_element("sSub")
+        base = m_element("e")
+        sub = m_element("sub")
+        append_group(base, base_children)
+        append_group(sub, sub_children)
+        node.extend([base, sub])
+        return node
+    if sup_children:
+        node = m_element("sSup")
+        base = m_element("e")
+        sup = m_element("sup")
+        append_group(base, base_children)
+        append_group(sup, sup_children)
+        node.extend([base, sup])
+        return node
+    return base_children[0] if len(base_children) == 1 else omml_run("")
+
+
+class LatexParser:
+    def __init__(self, source: str):
+        self.source = source.strip()
+        self.index = 0
+
+    def parse(self):
+        return self.parse_until()
+
+    def parse_until(self, stop_char=None):
+        nodes = []
+        text_buffer = []
+
+        def flush_text():
+            if text_buffer:
+                nodes.append(omml_run("".join(text_buffer)))
+                text_buffer.clear()
+
+        while self.index < len(self.source):
+            char = self.source[self.index]
+            if stop_char and char == stop_char:
+                break
+            if char == "\\":
+                flush_text()
+                nodes.extend(self.parse_command())
+                continue
+            if char in "_^":
+                flush_text()
+                if nodes:
+                    base = [nodes.pop()]
+                else:
+                    base = [omml_run("")]
+                sub = sup = None
+                while self.index < len(self.source) and self.source[self.index] in "_^":
+                    marker = self.source[self.index]
+                    self.index += 1
+                    group = self.parse_script_group()
+                    if marker == "_":
+                        sub = group
+                    else:
+                        sup = group
+                nodes.append(script_element(base, sub, sup))
+                continue
+            if char == "{":
+                self.index += 1
+                flush_text()
+                nodes.extend(self.parse_until("}"))
+                if self.index < len(self.source) and self.source[self.index] == "}":
+                    self.index += 1
+                continue
+            if char == "}":
+                break
+
+            text_buffer.append(char)
+            self.index += 1
+
+        flush_text()
+        return nodes
+
+    def parse_command(self):
+        self.index += 1
+        start = self.index
+        while self.index < len(self.source) and self.source[self.index].isalpha():
+            self.index += 1
+        command = self.source[start:self.index]
+
+        if not command and self.index < len(self.source):
+            symbol = self.source[self.index]
+            self.index += 1
+            if symbol in "{}_^":
+                return [omml_run(symbol)]
+            return [omml_run(symbol)]
+
+        if command in {"left", "right"}:
+            return []
+        if command in {"quad", "qquad"}:
+            return [omml_run("  " if command == "quad" else "    ")]
+        if command == "frac":
+            return [fraction_element(self.parse_required_group(), self.parse_required_group())]
+        if command == "sqrt":
+            return [radical_element(self.parse_required_group())]
+        if command == "hat":
+            return [accent_element(self.parse_required_group(), "\u0302")]
+        if command == "bar":
+            return [accent_element(self.parse_required_group(), "\u0305")]
+        if command == "tag":
+            return [omml_run(f"({self.group_text()})")]
+        if command == "text":
+            return [omml_run(self.group_text())]
+
+        return [omml_run(LATEX_SYMBOLS.get(command, command))]
+
+    def parse_required_group(self):
+        self.skip_spaces()
+        if self.index < len(self.source) and self.source[self.index] == "{":
+            self.index += 1
+            children = self.parse_until("}")
+            if self.index < len(self.source) and self.source[self.index] == "}":
+                self.index += 1
+            return children
+        if self.index < len(self.source):
+            char = self.source[self.index]
+            if char == "\\":
+                return self.parse_command()
+            self.index += 1
+            return [omml_run(char)]
+        return [omml_run("")]
+
+    def parse_script_group(self):
+        return self.parse_required_group()
+
+    def group_text(self):
+        self.skip_spaces()
+        if self.index >= len(self.source) or self.source[self.index] != "{":
+            return ""
+        self.index += 1
+        depth = 1
+        start = self.index
+        while self.index < len(self.source) and depth:
+            if self.source[self.index] == "{":
+                depth += 1
+            elif self.source[self.index] == "}":
+                depth -= 1
+            self.index += 1
+        return self.source[start : self.index - 1]
+
+    def skip_spaces(self):
+        while self.index < len(self.source) and self.source[self.index].isspace():
+            self.index += 1
 
 # ---------------------------------------------------------------------------
-# 核心：LaTeX → MathML → OMML
+# 核心：LaTeX → OMML
 # ---------------------------------------------------------------------------
 
 def latex2omml(latex_str: str) -> bytes:
     """
     将 LaTeX 字符串转换为 Word OMML XML（即 <m:oMath> 元素内的 XML 字符串）。
-
-    使用 latex2mathml 转换为 MathML，再包装为 OMML。
+    支持数学建模论文常用 LaTeX 子集：分式、根号、上下标、希腊字母、
+    求和/积分符号、比较符号和普通文本。
     """
-    try:
-        from latex2mathml import convert
-    except ImportError:
-        print("正在安装 latex2mathml...")
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "latex2mathml", "-q"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        from latex2mathml import convert
-
-    # Step 1: LaTeX → MathML (presentation MathML)
-    mathml_str = convert(latex_str)
-
-    # Step 2: 解析 MathML <math> 元素
-    mathml_root = etree.fromstring(mathml_str.encode("utf-8"))
-
-    # Step 3: 包装为 OMML <m:oMath> 元素
-    # OMML 容器中包含 MathML 内容，Word 同时支持这两种格式
     omml = etree.Element(f"{{{OMML_NS}}}oMath")
-
-    # 将 MathML 元素复制到 OMML 下
-    for child in mathml_root:
+    for child in LatexParser(latex_str).parse():
         omml.append(child)
-
-    # 如果 MathML 转换后没有子元素，则直接包装整个 math 元素
-    if len(omml) == 0:
-        for child in mathml_root.iter():
-            if child.tag == f"{{{MATHML_NS}}}math":
-                for grandchild in child:
-                    omml.append(grandchild)
-                break
-
     return etree.tostring(omml, encoding="unicode").encode("utf-8")
 
 
-def latex2mathml_direct(latex_str: str) -> str:
-    """仅返回 MathML 字符串（调试用）。"""
-    from latex2mathml import convert
-    return convert(latex_str)
+def latex2omml_direct(latex_str: str) -> str:
+    """仅返回 OMML 字符串（调试用）。"""
+    return latex2omml(latex_str).decode("utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -130,22 +365,81 @@ def replace_with_equation(para, omml_xml: bytes):
     for r in para._element.findall(qn("w:rPr")):
         para._element.remove(r)
 
-    # 解析 OMML XML
-    omml_elem = etree.fromstring(omml_xml)
-
     # 创建 <m:oMathPara> 包装器
     math_para = OxmlElement("m:oMathPara")
-    # 确保命名空间映射正确
-    math_para.set(f"xmlns:{OMML_PREFIX}", OMML_NS)
+    math_para.append(_build_math_element(omml_xml))
+    para._element.append(math_para)
 
-    # 将 <m:oMath> 添加到 <m:oMathPara>
+
+def _build_math_element(omml_xml: bytes):
+    """Build a Word math element from the converter output."""
+    omml_elem = etree.fromstring(omml_xml)
+
     math_elem = OxmlElement("m:oMath")
     for child in omml_elem:
         math_elem.append(child)
-    math_para.append(math_elem)
+    return math_elem
 
-    # 插入到段落
-    para._element.append(math_para)
+
+def _build_text_run(text: str, source_run=None):
+    """Create a Word run, preserving source run properties when possible."""
+    run = OxmlElement("w:r")
+    if source_run is not None:
+        r_pr = source_run.find(qn("w:rPr"))
+        if r_pr is not None:
+            run.append(copy.deepcopy(r_pr))
+
+    text_elem = OxmlElement("w:t")
+    if text.startswith((" ", "\t")) or text.endswith((" ", "\t")):
+        text_elem.set(qn("xml:space"), "preserve")
+    text_elem.text = text
+    run.append(text_elem)
+    return run
+
+
+def replace_inline_placeholder(para, placeholder: str, omml_xml: bytes) -> bool:
+    """
+    Replace one placeholder inside a paragraph without discarding surrounding text.
+
+    The common docx-js path emits placeholders as a single TextRun. If a Word
+    editor splits the placeholder across runs, fall back to rebuilding the
+    paragraph text so content is preserved, though original run styling may be
+    simplified.
+    """
+    for run in para._element.findall(qn("w:r")):
+        texts = run.findall(qn("w:t"))
+        if len(texts) != 1 or not texts[0].text or placeholder not in texts[0].text:
+            continue
+
+        before, after = texts[0].text.split(placeholder, 1)
+        parent = para._element
+        insert_at = parent.index(run)
+        parent.remove(run)
+
+        if before:
+            parent.insert(insert_at, _build_text_run(before, run))
+            insert_at += 1
+        parent.insert(insert_at, _build_math_element(omml_xml))
+        insert_at += 1
+        if after:
+            parent.insert(insert_at, _build_text_run(after, run))
+        return True
+
+    full_text = para.text
+    if placeholder not in full_text:
+        return False
+
+    before, after = full_text.split(placeholder, 1)
+    for child in list(para._element):
+        if child.tag in {qn("w:r"), qn("m:oMath"), qn("m:oMathPara")}:
+            para._element.remove(child)
+
+    if before:
+        para._element.append(_build_text_run(before))
+    para._element.append(_build_math_element(omml_xml))
+    if after:
+        para._element.append(_build_text_run(after))
+    return True
 
 
 def replace_placeholder(doc: Document, placeholder: str, latex: str):
@@ -165,11 +459,9 @@ def replace_placeholder(doc: Document, placeholder: str, latex: str):
         replace_with_equation(para, omml_xml)
         print(f"  ✓ '{placeholder}' → 公式已插入")
     else:
-        # 占位符在段落文本中，需要拆分
-        # 简化处理：整段替换
         omml_xml = latex2omml(latex)
-        replace_with_equation(para, omml_xml)
-        print(f"  ✓ '{placeholder}' → 公式已插入（整段替换）")
+        replace_inline_placeholder(para, placeholder, omml_xml)
+        print(f"  ✓ '{placeholder}' → 公式已插入（保留段落文字）")
 
     return True
 
@@ -200,8 +492,7 @@ def batch_replace(doc_path: str, mapping: dict, output_path: str):
 # 从 Markdown 生成 docx（使用 pandoc 后端）
 # ---------------------------------------------------------------------------
 
-def markdown_to_docx(md_path: str, output_path: str,
-                     template_path: str = None, mathml: bool = True):
+def markdown_to_docx(md_path: str, output_path: str, template_path: str = None):
     """
     使用 pandoc 将 Markdown 文件（含 $$ LaTeX $$）转换为 .docx。
 
@@ -210,8 +501,6 @@ def markdown_to_docx(md_path: str, output_path: str,
     需安装 pandoc: https://pandoc.org/installing.html
     """
     cmd = ["pandoc", str(md_path), "-o", str(output_path)]
-    if mathml:
-        cmd.append("--mathml")
     if template_path:
         cmd.extend(["--reference-doc", str(template_path)])
 
@@ -259,16 +548,14 @@ def build_parser():
                     help="单个替换对，可重复使用")
     rp.add_argument("--output", "-o", default=None,
                     help="输出 .docx 路径（默认覆盖输入文件）")
-    rp.add_argument("--show-mathml", action="store_true",
-                    help="仅显示 LaTeX → MathML 转换结果，不操作 docx")
+    rp.add_argument("--show-omml", action="store_true",
+                    help="仅显示 LaTeX → OMML 转换结果，不操作 docx")
 
     # ---- 模式 2: generate（从 Markdown 生成） ----
     gn = sub.add_parser("generate", help="从 Markdown 生成含公式的 .docx")
     gn.add_argument("input", help="输入 .md 文件路径（使用 $$...$$ 或 $...$ 写公式）")
     gn.add_argument("--output", "-o", required=True, help="输出 .docx 路径")
     gn.add_argument("--template", "-t", help="pandoc 参考模板 .docx")
-    gn.add_argument("--no-mathml", action="store_true",
-                    help="不使用 --mathml 标志（默认启用）")
 
     return parser
 
@@ -291,15 +578,15 @@ def main():
             parser.print_help()
             sys.exit(1)
 
-        if args.show_mathml:
-            print("LaTeX → MathML 预览:")
+        if args.show_omml:
+            print("LaTeX → OMML 预览:")
             print("=" * 60)
             for placeholder, latex in mapping.items():
                 print(f"\n占位符: {placeholder}")
                 print(f"LaTeX:   {latex}")
                 try:
-                    mathml = latex2mathml_direct(latex)
-                    print(f"MathML: {mathml}")
+                    omml = latex2omml_direct(latex)
+                    print(f"OMML: {omml}")
                 except Exception as e:
                     print(f"错误: {e}")
             return
@@ -311,7 +598,6 @@ def main():
         markdown_to_docx(
             args.input, args.output,
             template_path=args.template,
-            mathml=not args.no_mathml,
         )
 
     else:

@@ -15,7 +15,7 @@ A .docx file is a ZIP archive containing XML files.
 | Task | Approach |
 |------|----------|
 | Read/analyze content | `pandoc` or unpack for raw XML |
-| Create new document | Use `docx-js` - see Creating New Documents below |
+| Create new document | Use `python-docx` - see Creating New Documents below |
 | Edit existing document | Unpack → edit XML → repack - see Editing Existing Documents below |
 
 ### Converting .doc to .docx
@@ -55,9 +55,391 @@ python scripts/accept_changes.py input.docx output.docx
 
 ## Creating New Documents
 
-Generate .docx files with JavaScript, then validate. Install: `npm install -g docx`
+> **📌 推荐方案：python-docx（首选）** — 文档创建、公式处理、验证全流程 Python 完成，无需切换语言。
+>
+> **备选方案：docx-js（次选）** — 如遇 python-docx 不支持的场景（如复杂 OMML 公式原生注入），可回退到 npm docx + Python 后处理。
 
-### Setup
+---
+
+### 🐍 python-docx（推荐）
+
+Install: `pip install python-docx lxml`
+
+```python
+from docx import Document
+from docx.shared import Pt, Inches, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING, WD_BREAK
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml.ns import qn, nsdecls
+from docx.oxml import parse_xml
+
+doc = Document()
+# ... add content ...
+doc.save("output.docx")
+```
+
+#### Page Size
+```python
+section = doc.sections[0]
+section.page_width = Inches(8.5)
+section.page_height = Inches(11)
+section.left_margin = Inches(1)
+section.right_margin = Inches(1)
+section.top_margin = Inches(1)
+section.bottom_margin = Inches(1)
+```
+
+| Paper | Width | Height | Content (cm margins) |
+|-------|-------|--------|---------------------|
+| US Letter | 8.5" | 11" | 6.5" (1" margins) |
+| A4 | 8.27" / 21cm | 11.69" / 29.7cm | 14.66cm (3.17cm margins) |
+
+**国赛中文论文（从 论文模板.docx 提取）：**
+```python
+section = doc.sections[0]
+section.page_width  = Cm(21)
+section.page_height = Cm(29.7)
+section.left_margin   = Cm(3.17)
+section.right_margin  = Cm(3.17)
+section.top_margin    = Cm(2.54)
+section.bottom_margin = Cm(2.54)
+```
+
+Landscape:
+```python
+section.page_width = Inches(11)
+section.page_height = Inches(8.5)
+```
+
+#### Styles & Fonts
+
+**⚠️ 关键：必须显式设置东亚字体，否则 Word 回退为 MS 明朝/ＭＳ 明朝。**
+
+python-docx 默认使用文档主题引用字体（theme reference），当系统无对应主题时回退到日文字体。必须移除 theme 属性，显式指定 `w:eastAsia`。
+
+```python
+def set_ea_font(element, latin='Times New Roman', ea='宋体'):
+    """显式设置英文字体和东亚字体，移除 theme 引用（避免 MS 明朝回退）。"""
+    rPr = element.find(qn('w:rPr'))
+    if rPr is None:
+        rPr = parse_xml('<w:rPr ' + nsdecls('w') + '/>')
+        element.insert(0, rPr)
+    rFonts = rPr.find(qn('w:rFonts'))
+    if rFonts is None:
+        rFonts = parse_xml('<w:rFonts ' + nsdecls('w') + '/>')
+        rPr.insert(0, rFonts)
+    rFonts.set(qn('w:ascii'), latin)
+    rFonts.set(qn('w:hAnsi'), latin)
+    rFonts.set(qn('w:eastAsia'), ea)
+    for attr in ['w:asciiTheme', 'w:hAnsiTheme', 'w:eastAsiaTheme', 'w:cstheme']:
+        try:
+            del rFonts.attrib[qn(attr)]
+        except KeyError:
+            pass
+
+# Normal 样式：全文默认
+normal = doc.styles['Normal']
+normal.font.size = Pt(12)
+set_ea_font(normal, 'Times New Roman', '宋体')
+
+# 一级标题
+hs = doc.styles['Heading 1']
+hs.font.size = Pt(16); hs.font.bold = True
+set_ea_font(hs, '黑体', '黑体')
+
+# 使用
+def make_run(p, text, latin='Times New Roman', ea='宋体', size=None, bold=None):
+    """添加 run 时自动设置东亚字体。"""
+    r = p.add_run(text)
+    if size: r.font.size = size
+    if bold is not None: r.font.bold = bold
+    set_ea_font(r, latin, ea)
+    return r
+```
+
+**数学建模论文格式速查表（从 论文模板.docx 提取）：**
+
+| 元素 | 字体 | 字号 | 行距 | 首行缩进 | 段前段后 |
+|------|------|------|------|----------|---------|
+| 论文题目 | 黑体 | 四号/14pt | 1.25x | 无 | 0 |
+| 摘 要(标题) | 黑体 | 四号/14pt | 1.25x | 无 | 0 |
+| 摘要正文 | 宋体 | 小四/12pt | 1.25x | 2字符/304800EMU | 0 |
+| 关键词 | 宋体 | 小四/12pt | 1.25x | **顶格无缩进** | 0 |
+| 一级标题 | — | 三号/16pt | 1.25x | 无 | 0 |
+| 二级标题 | — | 四号/14pt | 1.25x | 无 | 0 |
+| 正文 | 宋体 | 小四/12pt | 1.25x | 2字符/304800EMU | 0 |
+| 附录 | 宋体 | 三号/16pt | 1.25x | 无 | 0 |
+
+#### Paragraphs & Text Runs
+
+使用 `make_run` 替代直接 `p.add_run()` 以确保东亚字体正确。
+
+```python
+def add_body(doc, text):
+    """正文段落辅助函数：宋体 小四 首行缩进2字符 1.25x行距"""
+    p = doc.add_paragraph()
+    p.paragraph_format.line_spacing = 1.25
+    p.paragraph_format.first_line_indent = 304800  # 2字符缩进 (EMU)
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(0)
+    make_run(p, text, ea='宋体', size=Pt(12))
+    return p
+
+def add_heading1(doc, text):
+    """一级标题：三号(16pt) 加粗 1.25x 无缩进"""
+    p = doc.add_paragraph()
+    p.paragraph_format.line_spacing = 1.25
+    make_run(p, text, ea='黑体', size=Pt(16), bold=True)
+    return p
+
+def add_heading2(doc, text):
+    """二级标题：四号(14pt) 1.25x 无缩进"""
+    p = doc.add_paragraph()
+    p.paragraph_format.line_spacing = 1.25
+    make_run(p, text, ea='黑体', size=Pt(14))
+    return p
+
+# 使用
+add_heading1(doc, '一、问题重述')
+add_heading2(doc, '1.1 问题背景')
+add_body(doc, '随着城市化进程加快，应急设施选址问题...')
+```
+
+#### Lists — 通过 XML 注入实现
+
+**⚠️ python-docx 创建文档时会自动生成默认编号定义。必须先清除再添加自定义定义，否则编号会冲突。**
+
+**⚠️ `numPr` 必须插入在 `ind`/`spacing` 之前（OOXML 元素顺序要求）。**
+
+```python
+NSP = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+
+def init_numbering(doc):
+    """清除默认编号，添加自定义定义。先加所有 abstractNum，再加所有 num（schema 顺序）。"""
+    np = doc.part.numbering_part._element
+    for child in list(np):
+        np.remove(child)
+    # abstractNum 0 (bullet)
+    np.append(parse_xml(
+        f'<w:abstractNum w:abstractNumId="0" xmlns:w="{NSP}">'
+        f'  <w:multiLevelType w:val="hybridMultilevel"/>'
+        f'  <w:lvl w:ilvl="0">'
+        f'    <w:start w:val="1"/><w:numFmt w:val="bullet"/>'
+        f'    <w:lvlText w:val="●"/><w:lvlJc w:val="left"/>'
+        f'    <w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr>'
+        f'  </w:lvl></w:abstractNum>'))
+    # abstractNum 1 (decimal)
+    np.append(parse_xml(
+        f'<w:abstractNum w:abstractNumId="1" xmlns:w="{NSP}">'
+        f'  <w:multiLevelType w:val="hybridMultilevel"/>'
+        f'  <w:lvl w:ilvl="0">'
+        f'    <w:start w:val="1"/><w:numFmt w:val="decimal"/>'
+        f'    <w:lvlText w:val="%1."/><w:lvlJc w:val="left"/>'
+        f'    <w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr>'
+        f'  </w:lvl></w:abstractNum>'))
+    # num 1 → abstractNum 0 (bullet)
+    np.append(parse_xml(
+        f'<w:num w:numId="1" xmlns:w="{NSP}"><w:abstractNumId w:val="0"/></w:num>'))
+    # num 2 → abstractNum 1 (decimal)
+    np.append(parse_xml(
+        f'<w:num w:numId="2" xmlns:w="{NSP}"><w:abstractNumId w:val="1"/></w:num>'))
+
+def list_item(doc, text, num_id=1, level=0):
+    p = doc.add_paragraph(text)
+    # 先设置格式，再插入 numPr
+    pPr = p._element.get_or_add_pPr()
+    numPr = parse_xml(
+        f'<w:numPr xmlns:w="{NSP}">'
+        f'  <w:ilvl w:val="{level}"/><w:numId w:val="{num_id}"/>'
+        f'</w:numPr>')
+    # CRITICAL: numPr 必须在 ind/spacing 之前
+    refs = [pPr.find(qn('w:ind')), pPr.find(qn('w:spacing'))]
+    refs = [r for r in refs if r is not None]
+    if refs:
+        pPr.insert(min(pPr.index(r) for r in refs), numPr)
+    else:
+        pPr.append(numPr)
+    return p
+```
+
+#### Tables
+
+**⚠️ 使用 `type=auto` 宽度（而非固定 DXA），由列宽度自动撑开。OOXML 元素顺序要求：`tblW` 必须在所有其他 `tblPr` 子元素之前。**
+
+```python
+def _set_cell_border(cell, **edges):
+    parts = ''.join(
+        f'<w:{e} w:val="single" w:sz="{a.get("sz",4)}" '
+        f'w:color="{a.get("color","000000")}" xmlns:w="{NSP}"/>'
+        for e, a in edges.items())
+    cell._tc.get_or_add_tcPr().append(parse_xml(
+        f'<w:tcBorders xmlns:w="{NSP}">{parts}</w:tcBorders>'))
+
+def set_table_auto_width(tblPr):
+    """移除已有 tblW，设为 auto 宽度。"""
+    existing = tblPr.find(qn('w:tblW'))
+    if existing is not None:
+        tblPr.remove(existing)
+    tblPr.insert(0, parse_xml(
+        f'<w:tblW w:w="0" w:type="auto" xmlns:w="{NSP}"/>'))
+
+table = doc.add_table(rows=3, cols=2)
+table.alignment = WD_TABLE_ALIGNMENT.CENTER
+set_table_auto_width(table._tbl.tblPr)
+
+for i, h in enumerate(["A", "B"]):
+    c = table.rows[0].cells[i]; c.text = h
+    c.width = Inches(2)  # 列宽决定表格实际宽度
+    c._tc.get_or_add_tcPr().append(parse_xml(
+        f'<w:shd w:fill="D5E8F0" w:val="clear" xmlns:w="{NSP}"/>'))
+    _set_cell_border(c, top={"sz":8,"color":"000000"}, bottom={"sz":4,"color":"000000"})
+```
+
+#### Three-Line Tables（三线表）
+
+**⚠️ 关键：必须先设置 auto 宽度，再插入 `tblBorders`。`tblBorders` 必须在 `tblLook` 之前（OOXML 扩展类型顺序）。tblBorders 子元素顺序：`top → start → left → bottom → end → right → insideH → insideV`。**
+
+```python
+def three_line_table(doc, headers, data, col_widths_dxa=None):
+    """三线表：自动宽度 + 按列宽设定 + 元素顺序严格遵循 schema。"""
+    n = len(headers)
+    table = doc.add_table(rows=1 + len(data), cols=n)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    tblPr = table._tbl.tblPr
+
+    # Step 1: 设置 auto 宽度（必须为 tblPr 第一个子元素）
+    set_table_auto_width(tblPr)
+
+    # Step 2: 插入 tblBorders（必须在 tblLook 之前）
+    tbl_borders = parse_xml(
+        f'<w:tblBorders xmlns:w="{NSP}">'
+        f'  <w:top w:val="none"/><w:start w:val="none"/>'
+        f'  <w:left w:val="none"/><w:bottom w:val="none"/>'
+        f'  <w:end w:val="none"/><w:right w:val="none"/>'
+        f'  <w:insideH w:val="none"/><w:insideV w:val="none"/>'
+        f'</w:tblBorders>')
+    look = tblPr.find(qn('w:tblLook'))
+    if look is not None:
+        tblPr.insert(tblPr.index(look), tbl_borders)
+    else:
+        tblPr.append(tbl_borders)
+
+    # Header row: 粗顶线 + 细底线段
+    for i, h in enumerate(headers):
+        c = table.rows[0].cells[i]; c.text = h
+        if col_widths_dxa: c.width = col_widths_dxa[i]
+        _set_cell_border(c, top={"sz":12,"color":"000000"},
+                         bottom={"sz":8,"color":"000000"})
+        for p in c.paragraphs:
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.line_spacing = 1.25
+    # Body rows: 仅最后一行有粗底线
+    for ri, row in enumerate(data):
+        last = ri == len(data) - 1
+        for ci, val in enumerate(row):
+            c = table.rows[ri+1].cells[ci]; c.text = str(val)
+            if col_widths_dxa: c.width = col_widths_dxa[ci]
+            if last:
+                _set_cell_border(c, bottom={"sz":12,"color":"000000"})
+            for p in c.paragraphs:
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p.paragraph_format.line_spacing = 1.25
+
+# 使用
+three_line_table(doc,
+    ['符号', '说明', '单位'],
+    [['n', '样本总数', '个'], ['N', '样本数', '个']],
+    col_widths_dxa=[1800, 4800, 1400])
+```
+            for p in c.paragraphs: p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+three_line_table(doc, ["符号", "说明", "单位"],
+    [["x_i", "第 i 个样本", "-"], ["N", "样本总数", "个"]])
+```
+
+三线表规范：仅顶线（粗）→ 表头底线（细）→ 表末底线（粗），无左右/竖线。
+
+#### Images
+```python
+p = doc.add_paragraph()
+p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+p.add_run().add_picture("figure.png", width=Inches(4.5))
+```
+
+#### Page Breaks
+```python
+doc.add_page_break()                      # 方式一
+p = doc.add_paragraph()
+p.add_run().add_break(WD_BREAK.PAGE)     # 方式二
+p2 = doc.add_paragraph("新页内容")
+p2.paragraph_format.page_break_before = True  # 方式三
+```
+
+#### Table of Contents（目录 — 须 XML 注入）
+```python
+def add_toc(doc):
+    p = doc.add_paragraph()
+    toc = f'''<w:p xmlns:w="{NSP}">
+      <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+      <w:r><w:instrText> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r>
+      <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+      <w:r><w:t>[在 Word 中右击 → 更新域]</w:t></w:r>
+      <w:r><w:fldChar w:fldCharType="end"/></w:r>
+    </w:p>'''
+    doc.element.findall(qn('w:body'))[0].append(parse_xml(toc))
+
+add_toc(doc)
+```
+
+#### Headers/Footers
+```python
+section = doc.sections[0]
+header = section.header
+header.is_linked_to_previous = False
+header.paragraphs[0].add_run('论文标题')
+
+footer = section.footer
+footer.is_linked_to_previous = False
+fp = footer.paragraphs[0]
+fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+fp._element.append(parse_xml(
+    f'<w:p xmlns:w="{NSP}">'
+    f'  <w:r><w:t>第 </w:t></w:r>'
+    f'  <w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+    f'  <w:r><w:instrText> PAGE </w:instrText></w:r>'
+    f'  <w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+    f'  <w:r><w:fldChar w:fldCharType="end"/></w:r>'
+    f'  <w:r><w:t> 页</w:t></w:r>'
+    f'</w:p>'))
+```
+
+#### python-docx 关键规则
+- **东亚字体必须显式设置** — 设置 `w:eastAsia` 并移除 `w:eastAsiaTheme`，否则 Word 回退为 MS 明朝
+- **页尺寸即时设置** — 创建 Document 后立即修改 `section.page_width/height`
+- **横排：手动互换** width/height；python-docx 不会自动调换
+- **A4 纸张** — `page_width=Cm(21)`, `page_height=Cm(29.7)`, margins=`Cm(3.17)`/`Cm(2.54)`
+- **不要使用 `\\n`** — 用多个 `add_paragraph()`
+- **不要用 Unicode 序号字符** — 用 `init_numbering()` + `list_item()`
+- **`numPr` 元素顺序** — 必须插入在 `ind`/`spacing` 之前，否则 XSD 验证报错
+- **表格：用 `type=auto`** — 不要设置固定 DXA 宽度，由列宽自动撑开
+- **表格：逐个设 cell.width** — 否则跨平台可能失效
+- **`tblW` 必须为 `tblPr` 第一个子元素** — 用 `insert(0, ...)` 而非 `append()`
+- **`tblBorders` 必须在 `tblLook` 之前** — OOXML 扩展类型顺序要求
+- **`tblBorders` 子元素顺序固定** — `top → start → left → bottom → end → right → insideH → insideV`
+- **编号定义：先清除默认** — python-docx 默认添加了 8 组 abstractNum/num，必须清空再自定义
+- **三线表：先清除 `tblBorders`**，再逐格添加 `tcBorders`
+- **公式：用占位符 + `equations.py` 后处理** — python-docx 无法原生创建 OMML
+- **始终 `doc.save()`** — python-docx 内存操作，不 save 不写入
+
+---
+
+### 📜 docx-js（备选）
+
+当 python-docx 无法满足需求时（如需要原生 OMML 公式直接注入），可使用 npm docx 生成再由 `equations.py` 后处理。
+
+Install: `npm install -g docx`
+
+#### Setup
 ```javascript
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, ImageRun,
         Header, Footer, AlignmentType, PageOrientation, LevelFormat, ExternalHyperlink,
@@ -68,13 +450,13 @@ const doc = new Document({ sections: [{ children: [/* content */] }] });
 Packer.toBuffer(doc).then(buffer => fs.writeFileSync("doc.docx", buffer));
 ```
 
-### Validation
+#### Validation
 After creating the file, validate it. If validation fails, unpack, fix the XML, and repack.
 ```bash
 python scripts/office/validate.py doc.docx
 ```
 
-### Page Size
+#### Page Size
 
 ```javascript
 // CRITICAL: docx-js defaults to A4, not US Letter
@@ -110,7 +492,7 @@ size: {
 // Content width = 15840 - left margin - right margin (uses the long edge)
 ```
 
-### Styles (Override Built-in Headings)
+#### Styles (Override Built-in Headings)
 
 Use Arial as the default font (universally supported). Keep titles black for readability.
 
@@ -136,7 +518,7 @@ const doc = new Document({
 });
 ```
 
-### Lists (NEVER use unicode bullets)
+#### Lists (NEVER use unicode bullets)
 
 ```javascript
 // ❌ WRONG - never manually insert bullet characters
@@ -170,7 +552,7 @@ const doc = new Document({
 // Different reference = restarts (1,2,3 then 1,2,3)
 ```
 
-### Tables
+#### Tables
 
 **CRITICAL: Tables need dual widths** - set both `columnWidths` on the table AND `width` on each cell. Without both, tables render incorrectly on some platforms.
 
@@ -217,7 +599,77 @@ columnWidths: [7000, 2360]  // Must sum to table width
 - Cell `margins` are internal padding - they reduce content area, not add to cell width
 - For full-width tables: use content width (page width minus left and right margins)
 
-### Images
+#### Academic Three-Line Tables
+
+For Chinese math-modeling papers, use proper three-line tables: top border, header-bottom border, and bottom border only. Do not draw left/right borders or internal vertical borders.
+
+```javascript
+const noBorder = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+const strongBorder = { style: BorderStyle.SINGLE, size: 12, color: "000000" };
+const thinBorder = { style: BorderStyle.SINGLE, size: 8, color: "000000" };
+
+function threeLineCell(text, width, { header = false, lastRow = false } = {}) {
+  return new TableCell({
+    width: { size: width, type: WidthType.DXA },
+    margins: { top: 80, bottom: 80, left: 120, right: 120 },
+    borders: {
+      top: header ? strongBorder : noBorder,
+      bottom: header ? thinBorder : (lastRow ? strongBorder : noBorder),
+      left: noBorder,
+      right: noBorder,
+    },
+    children: [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun({ text, bold: header, font: "SimSun", size: 24 })],
+      }),
+    ],
+  });
+}
+
+new Table({
+  width: { size: 9360, type: WidthType.DXA },
+  columnWidths: [3120, 3120, 3120],
+  borders: {
+    top: noBorder,
+    bottom: noBorder,
+    left: noBorder,
+    right: noBorder,
+    insideHorizontal: noBorder,
+    insideVertical: noBorder,
+  },
+  rows: [
+    new TableRow({
+      children: ["符号", "说明", "单位"].map(text =>
+        threeLineCell(text, 3120, { header: true })
+      ),
+    }),
+    new TableRow({
+      children: [
+        threeLineCell("x_i", 3120),
+        threeLineCell("第 i 个样本", 3120),
+        threeLineCell("-", 3120),
+      ],
+    }),
+    new TableRow({
+      children: [
+        threeLineCell("N", 3120, { lastRow: true }),
+        threeLineCell("样本总数", 3120, { lastRow: true }),
+        threeLineCell("个", 3120, { lastRow: true }),
+      ],
+    }),
+  ],
+});
+```
+
+Three-line table checklist:
+- Top border exists only on header cells or table top.
+- Header row has a bottom border.
+- Last row has the bottom border.
+- Left/right/inside vertical borders are `NONE`.
+- Body rows do not have internal horizontal lines unless the user template explicitly requires them.
+
+#### Images
 
 ```javascript
 // CRITICAL: type parameter is REQUIRED
@@ -231,7 +683,7 @@ new Paragraph({
 })
 ```
 
-### Equations / Math Formulas
+#### Equations / Math Formulas
 
 The `npm docx` package does not natively support mathematical equations. Use the Python post-processing script to insert proper Word equations (OMML format) into generated .docx files. Equations will be editable in Word.
 
@@ -239,7 +691,7 @@ The `npm docx` package does not natively support mathematical equations. Use the
 
 ```bash
 # 安装依赖
-pip install latex2mathml lxml python-docx
+pip install lxml python-docx
 
 # 单条公式替换
 python scripts/equations.py replace paper.docx ^
@@ -279,14 +731,14 @@ $$
 其中 $y_i$ 为真实值，$\hat{y}_i$ 为预测值。
 ```
 
-**Preview MathML output (debug):**
+**Preview OMML output (debug):**
 ```bash
-python scripts/equations.py replace dummy.docx --replace "x" "E = mc^2" --show-mathml
+python scripts/equations.py replace dummy.docx --replace "x" "E = mc^2" --show-omml
 ```
 
 ---
 
-### Page Breaks
+#### Page Breaks
 
 ```javascript
 // CRITICAL: PageBreak must be inside a Paragraph
@@ -296,14 +748,14 @@ new Paragraph({ children: [new PageBreak()] })
 new Paragraph({ pageBreakBefore: true, children: [new TextRun("New page")] })
 ```
 
-### Table of Contents
+#### Table of Contents
 
 ```javascript
 // CRITICAL: Headings must use HeadingLevel ONLY - no custom styles
 new TableOfContents("Table of Contents", { hyperlink: true, headingStyleRange: "1-3" })
 ```
 
-### Headers/Footers
+#### Headers/Footers
 
 ```javascript
 sections: [{
@@ -322,7 +774,7 @@ sections: [{
 }]
 ```
 
-### Critical Rules for docx-js
+#### docx-js Critical Rules
 
 - **Set page size explicitly** - docx-js defaults to A4; use US Letter (12240 x 15840 DXA) for US documents
 - **Landscape: pass portrait dimensions** - docx-js swaps width/height internally; pass short edge as `width`, long edge as `height`, and set `orientation: PageOrientation.LANDSCAPE`
@@ -530,10 +982,9 @@ After running `comment.py` (see Step 2), add markers to document.xml. For replie
 
 ## Dependencies
 
+- **python-docx**: `pip install python-docx` — **首选方案**，完整的 .docx 创建、编辑、公式后处理
+- **docx** (npm): `npm install -g docx` — **备选方案**，python-docx 不支持的场景下回退使用
 - **pandoc**: Text extraction, Markdown→docx equation conversion
-- **docx**: `npm install -g docx` (new documents)
-- **LibreOffice**: PDF conversion (auto-configured for sandboxed environments via `scripts/office/soffice.py`)
+- **LibreOffice**: PDF conversion, accepting tracked changes (auto-configured for sandboxed environments via `scripts/office/soffice.py`)
 - **Poppler**: `pdftoppm` for images
-- **latex2mathml**: `pip install latex2mathml` (equation conversion, auto-installed if missing)
-- **python-docx**: `pip install python-docx` (docx manipulation with equation support)
-- **lxml**: `pip install lxml` (XML processing for equation insertion)
+- **lxml**: `pip install lxml` — XML processing for equation insertion and validation
