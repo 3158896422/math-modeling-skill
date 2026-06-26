@@ -59,7 +59,7 @@
 - 🛠️ **文档处理集成**：集成 docx、pdf、xlsx、paper_search 四个专业子skill，支持：
   - 📘 **docx skill**：创建、读取、编辑Word文档，生成标准格式论文
   - 📑 **pdf skill**：读取PDF题目、提取文本和表格数据
-  - 📊 **xlsx skill**：处理Excel表格数据、结果输出，使用公式而非硬编码
+  - 📊 **xlsx skill**：处理Excel表格数据；普通结果汇总用 CSV，指定 Excel 模板保留结构和公式
   - 🔎 **paper_search skill**：通过 OpenAlex + AnySearch 双引擎并行搜索学术论文，支持交叉验证，提供更可靠的参考文献支持
 
 ## 🔄 工作流程
@@ -284,11 +284,10 @@ math-modeling-skill/
 │   │           ├── 工作流程.md
 │   │           ├── 章节模板.md
 │   │           ├── 写作规范.md
-│   │           ├── 进阶技巧.md
 │   │           ├── 自审框架.md
 │   │           ├── 英文化工作流.md
 │   │           ├── 论文模板.docx
-│   │           └── 默认论文模板.md
+│   │           └── 论文格式规范.md
 │   ├── Outstanding Thesis/    # 优秀论文资源库
 │   │   ├── CUMCM/             # 国赛优秀论文
 │   │   └── 2017MCM ICM/       # 美赛O奖论文（A-F题）
@@ -409,9 +408,9 @@ references/roles/
 #### 📦 其他
 
 - 所有角色文档路径从 `roles/` 迁移至 `references/roles/`
-- 新增 `roles/建模手/references/建模设计理论.md`
-- 新增 `roles/编程手/references/可视化面板模板.html`
-- 新增 `roles/论文手/references/论文模板.docx` + `默认论文模板.md`
+- 新增 `references/roles/建模手/references/建模设计理论.md`
+- 新增 `references/roles/编程手/references/可视化面板模板.html`
+- 新增 `references/roles/论文手/references/论文模板.docx`
 - 整体 README 和 CLAUDE.md 同步更新
 
 #### 🔬 可视化面板科研化重设计
@@ -438,7 +437,7 @@ references/roles/
 
 #### ✨ 重大更新：论文AI味去除系统
 
-针对AI生成论文容易被检测工具识别的问题，本次更新在 `references/roles/论文手说明.md` 中加入了完整的**去AI味写作指南**，基于Wikipedia的"Signs of AI writing"研究整理：
+针对AI生成论文容易被检测工具识别的问题，本次更新在 `references/roles/论文手/references/写作规范.md` 中加入了完整的**去AI味写作指南**，基于Wikipedia的"Signs of AI writing"研究整理：
 
 **七大类AI痕迹识别与去除：**
 
@@ -495,7 +494,7 @@ references/roles/
 **三角色必须正确使用对应skill：**
 
 - 🧠 **建模手**：使用 `pdf skill` 读题目、`xlsx skill` 分析数据、`paper_search skill` 搜索文献
-- 💻 **编程手**：使用 `xlsx skill` 处理Excel数据、使用公式而非硬编码
+- 💻 **编程手**：使用 `xlsx skill` 处理Excel数据；普通结果汇总用 CSV，指定 Excel 模板保留结构和公式
 - ✍️ **论文手**：使用 `docx skill` 生成.docx格式论文、使用 `paper_search skill` 交叉验证文献
 
 ---

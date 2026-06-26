@@ -79,7 +79,7 @@ description: 本技能应在用户要求"数学建模"、"建模比赛"、"数�
 
 - 确认用户指定的编程语言（Python、MATLAB等）
 - 按每道题目分开编写结构清晰的代码
-- 运行代码并将结果写入表格（保持表格原有结构）
+- 运行代码，普通结果汇总写入 CSV；指定 Excel 模板时保持原有结构
 - 绘制符合SCI/Nature标准的精美图表进行数据可视化（Figure Contract + 语义调色板 + SVG/PNG双格式）
 - 创建README文档说明项目
 
@@ -142,16 +142,15 @@ description: 本技能应在用户要求"数学建模"、"建模比赛"、"数�
 - **`references/roles/编程手/references/质检清单.md`** - 交付前 QA 检查清单
 - **`references/roles/论文手/SKILL.md`** - 论文撰写阶段入口，包含核心职责、工具速查、国赛vs美赛差异
 - **`references/roles/论文手/references/工作流程.md`** - 论证构建、Claim-Evidence映射、撰写流程
+- **`references/roles/论文手/references/论文格式规范.md`** - 页面、字体、标题、三线表、公式等 Word 格式规范
 - **`references/roles/论文手/references/章节模板.md`** - 摘要/引言/结果/讨论等章节架构模式
 - **`references/roles/论文手/references/写作规范.md`** - 人称约束、叙述方式、去AI味指南
-- **`references/roles/论文手/references/进阶技巧.md`** - 段落流检查、动词校准（美赛专用）
 - **`references/roles/论文手/references/自审框架.md`** - 交付前系统性自审（四轮审查框架）
 - **`references/roles/论文手/references/英文化工作流.md`** - 美赛专用：中文→英文三阶段转换流程
 
 ### 论文模板
 
 - **`references/roles/论文手/references/论文模板.docx`** - 标准数学建模论文模板（.docx格式）
-- **`references/roles/论文手/references/默认论文模板.md`** - 标准数学建模论文模板（Markdown版，含章节结构说明）
 
 ### 优秀论文资源库
 
@@ -223,8 +222,7 @@ description: 本技能应在用户要求"数学建模"、"建模比赛"、"数�
 - **`tools/xlsx`** - Excel表格处理
   - 读取和编辑 .xlsx 文件
   - 处理题目附带的数据表格
-  - 输出计算结果到Excel
-  - 使用Excel公式而非硬编码值
+  - 指定 Excel 模板时保留结构和公式
 
 - **`tools/paper_search`** - 论文搜索
   - 通过OpenAlex API搜索学术论文

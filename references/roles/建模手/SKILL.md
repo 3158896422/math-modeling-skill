@@ -25,8 +25,9 @@ description: 数学建模的建模分析阶段。当进入"建模分析"阶段�
 
 | 文档 | 用途 |
 |------|------|
-| `roles/建模手/references/前置合同.md` | Model Contract 前置规划框架 |
-| `references/建模设计理论.md` | 模型选择、复杂度控制、组合策略、证据层次 |
+| `references/roles/建模手/references/前置合同.md` | Model Contract 前置规划框架 |
+| `references/roles/建模手/references/工作流程.md` | 附录检查、题目理解、模型选择、术语规范、缺失输入处理 |
+| `references/roles/建模手/references/建模设计理论.md` | 模型选择、复杂度控制、组合策略、证据层次 |
 
 ---
 
@@ -73,4 +74,4 @@ description: 数学建模的建模分析阶段。当进入"建模分析"阶段�
 |------|------|---------|
 | 读取PDF题目 | `tools/pdf` | 题目为PDF格式时 |
 | 分析Excel数据 | `tools/xlsx` | 题目附带表格数据时 |
-| 搜索学术文献 | `tools/paper_search` | 模型选择后搜索理论支撑 |
+| 搜索学术文献 | `tools/paper_search/scripts/hybrid_scholar.py` | 模型选择后搜索理论支撑 |

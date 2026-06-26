@@ -16,6 +16,8 @@ A .docx file is a ZIP archive containing XML files.
 |------|----------|
 | Read/analyze content | `pandoc` or unpack for raw XML |
 | Create new document | Use `python-docx` - see Creating New Documents below |
+| Create math-modeling paper | Use `scripts/paper_format.py`, then `scripts/equations.py replace` for formulas |
+| Check environment/output | Run `scripts/check_env.py` and `scripts/self_check.py` |
 | Edit existing document | Unpack → edit XML → repack - see Editing Existing Documents below |
 
 ### Converting .doc to .docx
@@ -58,6 +60,8 @@ python scripts/accept_changes.py input.docx output.docx
 > **📌 推荐方案：python-docx（首选）** — 文档创建、公式处理、验证全流程 Python 完成，无需切换语言。
 >
 > **备选方案：docx-js（次选）** — 如遇 python-docx 不支持的场景（如复杂 OMML 公式原生注入），可回退到 npm docx + Python 后处理。
+
+数学建模论文优先复用 `scripts/paper_format.py`，格式依据 `references/roles/论文手/references/论文格式规范.md`。LaTeX 只用于公式，不用于整篇论文排版。
 
 ---
 
@@ -365,6 +369,44 @@ p = doc.add_paragraph()
 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 p.add_run().add_picture("figure.png", width=Inches(4.5))
 ```
+
+#### References / Citations
+
+**⚠️ 交叉引用要求**：正文中的引用标注 `[1]` 必须与参考文献列表严格对应。由于 python-docx 不支持 Word 的原生交叉引用域，采用纯文本编号方案：
+
+```python
+# 参考文献列表（按正文首次出现顺序编号）
+references = [
+    '[1] Daskin M S. Network and Discrete Location[M]. New York: John Wiley & Sons, 1995.',
+    '[2] Deb K, et al. A fast NSGA-II[J]. IEEE Trans. on Evolutionary Computation, 2002, 6(2): 182-197.',
+    '[3] Snyder L V. Facility location under uncertainty: a review[J]. IIE Trans., 2006, 38(7): 547-564.',
+]
+
+def add_citation(doc, ref_num):
+    """在正文中添加引用标记 [n]。"""
+    p = doc.add_paragraph()
+    r = p.add_run(f'[{ref_num}]')
+    r.font.size = Pt(12)
+    return p
+
+def add_references_section(doc, title, refs):
+    """在文末生成参考文献章节。"""
+    add_heading1(doc, title)
+    for ref in refs:
+        p = doc.add_paragraph()
+        p.paragraph_format.line_spacing = 1.25
+        r = p.add_run(ref)
+        r.font.size = Pt(12)
+```
+
+**撰写时的引用流程**：
+1. 正文中首次引用文献时标注 `[1]`、`[2]`...
+2. 再次引用同一文献时复用首次编号
+3. 参考文献列表按 `[1]`, `[2]`, `[3]`... 顺序排列（非字母顺序）
+4. 自审时逐条核验：正文章有标，参考文献有引
+
+> **注意**：Word 的原生交叉引用（插入→引用→交叉引用）需要手动操作，不适合自动化生成。
+> 纯文本 `[n]` 方案在数学建模论文中可接受且广泛使用。
 
 #### Page Breaks
 ```python
@@ -711,9 +753,9 @@ JSON 映射文件格式:
 }
 ```
 
-**Method 2 — 从 Markdown 生成 (pandoc 后端):**
+**Method 2 — 从 Markdown 生成 (pandoc 后端，非论文手主流程):**
 
-先用 Markdown 写论文（用 `$$...$$` 或 `$...$` 写公式），再一键转换为 .docx，pandoc 会自动将 LaTeX 方程转为 Word OMML 公式。
+仅在用户明确要求 Markdown 全文转换时使用。数学建模论文手默认使用 `paper_format.py` 生成 Word，LaTeX 只用于公式占位符替换。
 
 ```bash
 # 需要安装 pandoc: https://pandoc.org/installing.html

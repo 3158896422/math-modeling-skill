@@ -25,8 +25,8 @@ description: 数学建模的代码实现阶段。当进入"代码实现"阶段�
 
 | 文档 | 用途 |
 |------|------|
-| `roles/编程手/references/工作流程.md` | 完整工作流程、代码规范、结果输出要求 |
-| `roles/编程手/references/可视化规范.md` | 可视化完整规范（Figure Contract、调色板、SVG导出、HTML面板） |
+| `references/roles/编程手/references/工作流程.md` | 完整工作流程、代码规范、结果输出要求 |
+| `references/roles/编程手/references/可视化规范.md` | 可视化完整规范（Figure Contract、调色板、SVG导出、HTML面板） |
 
 ---
 
@@ -63,8 +63,9 @@ description: 数学建模的代码实现阶段。当进入"代码实现"阶段�
 |------|------|---------|
 | 读取/写入Excel | `tools/xlsx` | 处理题目附带的表格数据 |
 | 读取PDF题目 | `tools/pdf` | 题目为PDF格式时 |
-| SCI/Nature可视化 | `roles/编程手/references/可视化规范.md` | 生成出版级图表 |
-| HTML面板模板 | `references/可视化面板模板.html` | 生成图表导航面板时参考 |
+| 检查Python环境 | `references/roles/编程手/scripts/check_env.py` | 编写代码前先执行 |
+| SCI/Nature可视化 | `references/roles/编程手/references/可视化规范.md` | 生成出版级图表 |
+| HTML面板模板 | `references/roles/编程手/references/可视化面板模板.html` | 生成图表导航面板时参考 |
 
 ---
 

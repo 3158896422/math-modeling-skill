@@ -25,12 +25,17 @@ description: 数学建模的论文撰写阶段。当进入"论文撰写"阶段�
 
 | 文档 | 用途 |
 |------|------|
-| `roles/论文手/references/工作流程.md` | 论证构建流程、缺失输入处理、正式输出格式 |
-| `roles/论文手/references/章节模板.md` | 各章节架构模式（摘要/引言/结果/讨论等） |
-| `roles/论文手/references/写作规范.md` | 人称约束、叙述方式、去AI味写作指南 |
-| `roles/论文手/references/自审框架.md` | 交付前四轮系统性自审（替代简单质检清单） |
-| `roles/论文手/references/英文化工作流.md` | 美赛专用：中文→英文三阶段转换 |
-| `roles/论文手/references/默认论文模板.md` | 标准论文模板（Markdown版），撰写时参考章节结构 |
+| `references/roles/论文手/references/工作流程.md` | 论证构建流程、缺失输入处理、正式输出格式 |
+| `references/roles/论文手/references/论文格式规范.md` | 页面、标题、正文、三线表、公式等 Word 格式规范 |
+| `references/roles/论文手/references/章节模板.md` | 各章节架构模式（摘要/引言/结果/讨论等） |
+| `references/roles/论文手/references/写作规范.md` | 人称约束、叙述方式、去AI味写作指南 |
+| `references/roles/论文手/references/自审框架.md` | 交付前四轮系统性自审（替代简单质检清单） |
+
+**仅在美赛或英文论文任务中阅读**：
+
+| 文档 | 用途 |
+|------|------|
+| `references/roles/论文手/references/英文化工作流.md` | 美赛专用：中文→英文三阶段转换 |
 
 ---
 
@@ -39,12 +44,11 @@ description: 数学建模的论文撰写阶段。当进入"论文撰写"阶段�
 | 文件 | 什么时候打开 |
 |------|-------------|
 | `references/工作流程.md` | 开始撰写前，包含论证构建、缺失输入处理、正式输出格式 |
+| `references/论文格式规范.md` | 生成 Word 前，确认页面、字体、三线表、公式规范 |
 | `references/章节模板.md` | 撰写各章节时，包含摘要/引言/结果/讨论/相关工作等架构模式 |
 | `references/写作规范.md` | 检查写作规范性时，包含人称约束、叙述方式、去AI味指南 |
-| `references/进阶技巧.md` | 提升写作质量时，包含段落流检查、动词校准（美赛专用） |
 | `references/自审框架.md` | 交付前系统性自审，四轮审查（论证逻辑→章节结构→表述质量→格式规范） |
 | `references/英文化工作流.md` | 美赛专用：中文→英文三阶段转换流程，含句式转换、动词校准、常见错误 |
-| `references/默认论文模板.md` | 标准论文模板（Markdown版），含完整章节结构和占位符说明 |
 
 ---
 
@@ -55,8 +59,7 @@ description: 数学建模的论文撰写阶段。当进入"论文撰写"阶段�
 | 模板来源 | 路径 |
 |---------|------|
 | 用户自定义 | 工作目录下的 `template.docx` 或 `论文模板.docx` |
-| 项目默认 | `roles/论文手/references/论文模板.docx` |
-| 默认模板(MD版) | `roles/论文手/references/默认论文模板.md` |
+| 项目默认 | `references/roles/论文手/references/论文模板.docx` |
 
 ---
 
@@ -64,7 +67,8 @@ description: 数学建模的论文撰写阶段。当进入"论文撰写"阶段�
 
 | 功能 | 工具 | 使用时机 |
 |------|------|---------|
-| 生成Word论文 | `tools/docx` | 必须使用，论文一律输出.docx格式 |
+| 生成Word论文 | `tools/docx/scripts/paper_format.py` | 必须使用，论文一律输出.docx格式 |
+| 一键检查 | `tools/docx/scripts/self_check.py` | 交付前检查环境、公式、三线表、模板 |
 | 读取PDF题目/论文 | `tools/pdf` | 读取PDF格式的题目或参考论文 |
 | 搜索学术文献 | `tools/paper_search` | 搜索参考文献，与建模手交叉验证 |
 
