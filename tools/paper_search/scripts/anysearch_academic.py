@@ -8,11 +8,26 @@ AnySearch Academic — 基于 AnySearch API 的学术论文搜索封装
 
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
 ENDPOINT = "https://api.anysearch.com/mcp"
+
+
+def _configure_stdio() -> None:
+    """Avoid UnicodeEncodeError on Windows consoles using legacy encodings."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
+
+_configure_stdio()
 
 
 class AnySearchAcademic:

@@ -16,7 +16,7 @@ A .docx file is a ZIP archive containing XML files.
 |------|----------|
 | Read/analyze content | `pandoc` or unpack for raw XML |
 | Create new document | Use `python-docx` - see Creating New Documents below |
-| Create math-modeling paper | Use `scripts/paper_format.py`, then `scripts/equations.py replace` for formulas |
+| Create math-modeling paper | Use `scripts/paper_format.py`; use `scripts/equations.py replace` only for existing placeholders |
 | Check environment/output | Run `scripts/check_env.py` and `scripts/self_check.py` |
 | Edit existing document | Unpack → edit XML → repack - see Editing Existing Documents below |
 
@@ -470,7 +470,7 @@ fp._element.append(parse_xml(
 - **`tblBorders` 子元素顺序固定** — `top → start → left → bottom → end → right → insideH → insideV`
 - **编号定义：先清除默认** — python-docx 默认添加了 8 组 abstractNum/num，必须清空再自定义
 - **三线表：先清除 `tblBorders`**，再逐格添加 `tcBorders`
-- **公式：用占位符 + `equations.py` 后处理** — python-docx 无法原生创建 OMML
+- **公式：优先用 `paper_format.equation()`** — 只有已有占位符文档才用 `equations.py replace`
 - **始终 `doc.save()`** — python-docx 内存操作，不 save 不写入
 
 ---

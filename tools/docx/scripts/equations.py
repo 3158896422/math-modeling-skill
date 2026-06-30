@@ -32,6 +32,10 @@ import tempfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 try:
     from docx import Document
     from docx.oxml import OxmlElement
@@ -448,7 +452,7 @@ def replace_placeholder(doc: Document, placeholder: str, latex: str):
     """
     para = find_paragraph_with_text(doc, placeholder)
     if para is None:
-        print(f"  ⚠ 未找到占位符 '{placeholder}'，跳过")
+        print(f"  ! 未找到占位符 '{placeholder}'，跳过")
         return False
 
     # 检查是否是纯占位符段落
@@ -457,11 +461,11 @@ def replace_placeholder(doc: Document, placeholder: str, latex: str):
         # 整段替换
         omml_xml = latex2omml(latex)
         replace_with_equation(para, omml_xml)
-        print(f"  ✓ '{placeholder}' → 公式已插入")
+        print(f"  OK '{placeholder}' -> 公式已插入")
     else:
         omml_xml = latex2omml(latex)
         replace_inline_placeholder(para, placeholder, omml_xml)
-        print(f"  ✓ '{placeholder}' → 公式已插入（保留段落文字）")
+        print(f"  OK '{placeholder}' -> 公式已插入（保留段落文字）")
 
     return True
 
@@ -484,7 +488,7 @@ def batch_replace(doc_path: str, mapping: dict, output_path: str):
             success += 1
 
     doc.save(output_path)
-    print(f"\n完成: {success}/{len(mapping)} 个公式已插入 → {output_path}")
+    print(f"\n完成: {success}/{len(mapping)} 个公式已插入 -> {output_path}")
     return success
 
 
@@ -507,7 +511,7 @@ def markdown_to_docx(md_path: str, output_path: str, template_path: str = None):
     print(f"运行: {' '.join(cmd)}")
     try:
         subprocess.run(cmd, check=True)
-        print(f"✓ 已生成: {output_path}")
+        print(f"OK 已生成: {output_path}")
     except FileNotFoundError:
         print("错误: pandoc 未安装。请安装: https://pandoc.org/installing.html", file=sys.stderr)
         print("  或使用 batch_replace 模式对现有 .docx 注入公式。", file=sys.stderr)
@@ -534,7 +538,7 @@ def load_mapping(file_path: str) -> dict:
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="LaTeX 方程 → Word OMML 公式转换工具",
+        description="LaTeX 方程转 Word OMML 公式工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="mode", help="运行模式")
@@ -549,7 +553,7 @@ def build_parser():
     rp.add_argument("--output", "-o", default=None,
                     help="输出 .docx 路径（默认覆盖输入文件）")
     rp.add_argument("--show-omml", action="store_true",
-                    help="仅显示 LaTeX → OMML 转换结果，不操作 docx")
+                    help="仅显示 LaTeX 转 OMML 转换结果，不操作 docx")
 
     # ---- 模式 2: generate（从 Markdown 生成） ----
     gn = sub.add_parser("generate", help="从 Markdown 生成含公式的 .docx")
@@ -579,7 +583,7 @@ def main():
             sys.exit(1)
 
         if args.show_omml:
-            print("LaTeX → OMML 预览:")
+            print("LaTeX -> OMML 预览:")
             print("=" * 60)
             for placeholder, latex in mapping.items():
                 print(f"\n占位符: {placeholder}")

@@ -19,6 +19,20 @@ from openalex_scholar import OpenAlexScholar, Paper
 from anysearch_academic import AnySearchAcademic
 
 
+def _configure_stdio() -> None:
+    """Avoid UnicodeEncodeError on Windows consoles using legacy encodings."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
+
+_configure_stdio()
+
+
 # ---------------------------------------------------------------------------
 # 搜索结果联合数据类
 # ---------------------------------------------------------------------------
@@ -103,6 +117,8 @@ class HybridScholar:
                 "stats": {...},
             }
         """
+        self._current_query = query
+
         # 决定启用哪些源
         use_oa = not anysearch_only
         use_any = not openalex_only
@@ -419,8 +435,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--query", "-q", required=True, help="搜索关键词")
     parser.add_argument("--limit", "-n", type=int, default=8,
                         help="最终返回结果数量（默认 8）")
-    parser.add_argument("--email", "-e", default="your@email.com",
-                        help="OpenAlex 礼貌池邮箱")
+    parser.add_argument("--email", "-e",
+                        help="OpenAlex 礼貌池邮箱（建议填写真实邮箱）")
     parser.add_argument("--anysearch-api-key",
                         help="AnySearch API Key（默认读取 ANYSEARCH_API_KEY 环境变量）")
     parser.add_argument("--sort", "-s",

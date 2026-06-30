@@ -69,6 +69,10 @@ Unless otherwise stated by the user or existing template
 
 A user may ask you to create, edit, or analyze the contents of an .xlsx file. You have different tools and workflows available for different tasks.
 
+## 数学建模项目约定
+
+普通结果汇总优先输出 CSV；只有指定 Excel 模板、需要保留公式、多 sheet 或题目要求 `.xlsx` 时，才按本 skill 的 Excel 公式与重算流程处理。
+
 ## Important Requirements
 
 **LibreOffice Required for Formula Recalculation**: You can assume LibreOffice is installed for recalculating formula values using the `scripts/recalc.py` script. The script automatically configures LibreOffice on first run, including in sandboxed environments where Unix sockets are restricted (handled by `scripts/office/soffice.py`)

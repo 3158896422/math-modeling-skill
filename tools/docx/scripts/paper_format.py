@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """Tiny python-docx helpers for the default math-modeling paper format."""
 
+import re
+import sys
+import uuid
+from pathlib import Path
+
 from docx import Document
+from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
+from lxml import etree
 
 
 def set_run_font(run, font="宋体", size=12, bold=False):
@@ -58,7 +65,34 @@ def body(doc, text):
     return paragraph(doc, text, first_line=True)
 
 
+def _latex2omml(latex):
+    try:
+        from .equations import latex2omml
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from equations import latex2omml
+    return latex2omml(latex)
+
+
+def equation(doc, latex):
+    p = paragraph(doc, align=WD_ALIGN_PARAGRAPH.CENTER)
+    math_para = OxmlElement("m:oMathPara")
+    math = OxmlElement("m:oMath")
+    for child in etree.fromstring(_latex2omml(latex)):
+        math.append(child)
+    math_para.append(math)
+    p._element.append(math_para)
+    return p
+
+
+def equation_placeholder(doc, latex, prefix="EQ"):
+    placeholder = f"{prefix}_{uuid.uuid4().hex[:8].upper()}"
+    body(doc, placeholder)
+    return placeholder, latex
+
+
 def keywords(doc, text):
+    paragraph(doc)
     p = paragraph(doc)
     set_run_font(p.add_run("关键词："), bold=True)
     set_run_font(p.add_run(text))
@@ -67,13 +101,14 @@ def keywords(doc, text):
 
 def heading1(doc, text):
     p = paragraph(doc, align=WD_ALIGN_PARAGRAPH.CENTER)
+    p.paragraph_format.page_break_before = True
     set_run_font(p.add_run(text), size=16, bold=True)
     return p
 
 
 def heading2(doc, text):
     p = paragraph(doc)
-    set_run_font(p.add_run(text), size=12, bold=False)
+    set_run_font(p.add_run(text), size=14, bold=False)
     return p
 
 
@@ -81,6 +116,32 @@ def heading3(doc, text):
     p = paragraph(doc, align=WD_ALIGN_PARAGRAPH.JUSTIFY)
     set_run_font(p.add_run(text), size=12, bold=True)
     return p
+
+
+def page_break(doc):
+    doc.add_page_break()
+
+
+def section_break(doc):
+    doc.add_section(WD_SECTION.NEW_PAGE)
+
+
+def image(doc, path, width_cm=12):
+    p = paragraph(doc, align=WD_ALIGN_PARAGRAPH.CENTER)
+    with open(path, "rb") as image_file:
+        p.add_run().add_picture(image_file, width=Cm(width_cm))
+    return p
+
+
+def figure_caption(doc, text):
+    p = paragraph(doc, align=WD_ALIGN_PARAGRAPH.CENTER)
+    set_run_font(p.add_run(text), size=10)
+    return p
+
+
+def count_chinese_chars(doc):
+    text = "\n".join(p.text for p in doc.paragraphs)
+    return len(re.findall(r"[\u4e00-\u9fff]", text))
 
 
 def _border(val="nil", size="0"):

@@ -8,10 +8,25 @@ OpenAlex Scholar - 学术论文搜索工具
 
 import argparse
 import json
+import sys
 import urllib.request
 import urllib.parse
 from typing import List, Dict, Optional
 from dataclasses import dataclass, asdict
+
+
+def _configure_stdio() -> None:
+    """Avoid UnicodeEncodeError on Windows consoles using legacy encodings."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
+
+_configure_stdio()
 
 
 __all__ = ['Paper', 'OpenAlexScholar']
@@ -269,7 +284,7 @@ def main():
         description="OpenAlex 学术论文搜索工具 — 支持多条件过滤和排序"
     )
     parser.add_argument("--query", "-q", required=True, help="搜索关键词")
-    parser.add_argument("--email", "-e", default="your@email.com",
+    parser.add_argument("--email", "-e",
                         help="邮箱地址（用于礼貌池，建议填写真实邮箱）")
     parser.add_argument("--limit", "-n", type=int, default=8,
                         help="每页返回结果数量（默认8，最大200）")
@@ -304,7 +319,8 @@ def main():
         print(f"年份范围: {args.year_from or '不限'} ~ {args.year_to or '不限'}")
     if args.field:
         print(f"领域限定: {args.field}")
-    print(f"邮箱: {args.email}")
+    if args.email:
+        print(f"邮箱: {args.email}")
     print("-" * 80)
 
     scholar = OpenAlexScholar(email=args.email)

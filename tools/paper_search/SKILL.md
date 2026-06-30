@@ -93,14 +93,14 @@ description: "Search academic papers via OpenAlex + AnySearch with cross-validat
 使用 `hybrid_scholar.py` 同时调用两个引擎：
 
 ```bash
-# 基础混合搜索
+# 基础混合搜索（建议提供真实邮箱进入 OpenAlex 礼貌池）
 python tools/paper_search/scripts/hybrid_scholar.py --query "grey prediction model" --email "your@email.com"
 
 # 高级过滤 + 交叉验证
-python tools/paper_search/scripts/hybrid_scholar.py --query "TOPSIS" --min-citations 10 --year-from 2020 --field mathematics --limit 10
+python tools/paper_search/scripts/hybrid_scholar.py --query "TOPSIS" --email "your@email.com" --min-citations 10 --year-from 2020 --field mathematics --limit 10
 
 # JSON 输出
-python tools/paper_search/scripts/hybrid_scholar.py --query "LSTM" --json
+python tools/paper_search/scripts/hybrid_scholar.py --query "LSTM" --email "your@email.com" --json
 ```
 
 输出分为三个区域：
@@ -251,7 +251,7 @@ json_str = scholar.results_to_json(result)
 ### OpenAlex 邮箱配置
 
 ```bash
-# 所有 OpenAlex 搜索需提供邮箱
+# OpenAlex 搜索建议提供真实邮箱，进入礼貌池并降低限流风险
 --email "your@email.com"
 ```
 
