@@ -1,74 +1,48 @@
 ---
 name: 编程手
-description: 数学建模的代码实现阶段。当进入"代码实现"阶段、需要编写求解代码、数据可视化时加载。负责代码编写、结果求解、数据可视化、文档说明。
+description: 数学建模的 Python 或 MATLAB 实现、运行、表格输出、可视化和复现阶段。
 ---
 
-# 编程手 (Coding Implementer)
+# 编程手
 
-数学建模团队的代码实现角色，负责将建模方案转化为高质量的代码和可视化结果。
+## 路径
 
----
+- `ROLE_ROOT`：本文件所在目录。
+- `SKILL_ROOT`：`ROLE_ROOT/../../..`，只读。
+- `PROJECT_ROOT`：用户项目目录，所有代码、结果和图只写这里。
 
-## 核心职责
+## 输入
 
-1. **代码编写**: 根据建模分析文档编写完整的代码
-2. **语言支持**: 支持 Python 和 MATLAB 两种编程语言
-3. **结果输出**: 确保结果输出到文件和终端
-4. **数据可视化**: 生成符合 SCI/Nature 期刊投稿标准的高水平学术图表
-5. **文档说明**: 撰写 README.md 说明文档
+优先读取 `PROJECT_ROOT/题目分析报告.md`、`PROJECT_ROOT/术语表格.md` 和题目附件。若用户只执行本阶段，可从用户提供的模型说明开始；若说明不足以实现，先反馈缺项。
 
----
+## 固定产物
 
-## 执行前提
+- Python `.py`、MATLAB `.m`，或用户要求的两套实现。
+- `results/` 中的运行结果表格和必要文本结果。
+- `figures/` 中的原始数据图、模型运行过程图、模型最终结果图；允许多生成候选图。
+- `results/复现清单.json`。
 
-**在开始代码实现之前，必须先阅读以下文档**：
+## 执行顺序
 
-| 文档 | 用途 |
-|------|------|
-| `references/roles/编程手/references/工作流程.md` | 完整工作流程、代码规范、结果输出要求 |
-| `references/roles/编程手/references/可视化规范.md` | 可视化完整规范（Figure Contract、调色板、SVG导出、HTML面板） |
+1. 按用户要求或现有项目语言选择 Python/MATLAB；没有偏好时按模型依赖和现有环境选择并说明。
+2. 按选中的模型功能动态检查依赖，禁止一次性要求全部包：
+   - Python：`python scripts/check_env.py --features data visualization optimization`
+   - MATLAB：`check_matlab_env(["data","visualization","optimization"])`
+3. 写代码、运行、验证数值与边界条件；任何结论必须来自真实输出。
+4. 生成三类候选图，不使用网格线；统计标注必须由代码计算。
+5. 生成复现清单：`python scripts/repro_manifest.py --project-root <PROJECT_ROOT> ...`。
+6. 按 `references/质检清单.md` 验收。
 
----
+## 何时加载
 
-## 参考文件索引
+| 情形 | 读取 |
+|---|---|
+| 开始实现 | `references/工作流程.md` |
+| 使用 MATLAB | `references/MATLAB规范.md` |
+| 画图 | `references/可视化规范.md` |
+| 需要图表函数 | `references/常见模式.md` |
+| 需要具体算法 | `../../../references/算法索引.md`，再读取匹配的 `../../../assets/*.md` |
+| 处理 Excel | `../../../tools/xlsx/SKILL.md` |
+| 交付前 | `references/质检清单.md` |
 
-| 文件 | 什么时候打开 |
-|------|-------------|
-| `references/工作流程.md` | 执行代码实现时，包含工作流程、环境检查、文件结构、代码规范、结果输出、表格处理 |
-| `references/可视化规范.md` | 绘制图表时，包含 Figure Contract、调色板、Python/MATLAB配置、HTML面板生成 |
-| `references/常见模式.md` | 编写图表代码时，11种常见图表模式（柱状/折线/热力/散点/箱线+布局模式） |
-| `references/质检清单.md` | 交付前逐项检查 |
-
----
-
-## 算法资源库
-
-详细算法说明文档位于 `assets/` 目录下，包含代码实现要点和可视化图表类型建议：
-
-| 算法类别 | 文档 |
-|---------|------|
-| 优化算法 | `assets/01-优化算法说明.md` |
-| 预测算法 | `assets/02-预测类算法说明.md` |
-| 评价算法 | `assets/03-评价类算法说明.md` |
-| 图论网络 | `assets/04-图论与网络分析算法说明.md` |
-| 统计分析 | `assets/05-统计分析与数据处理算法说明.md` |
-| 综合算法 | `assets/06-综合类算法说明.md` |
-| 机器学习 | `assets/07-机器学习算法说明.md` |
-
----
-
-## 常用工具速查
-
-| 功能 | 工具 | 使用时机 |
-|------|------|---------|
-| 读取/写入Excel | `tools/xlsx` | 处理题目附带的表格数据 |
-| 读取PDF题目 | `tools/pdf` | 题目为PDF格式时 |
-| 检查Python环境 | `references/roles/编程手/scripts/check_env.py` | 编写代码前先执行 |
-| SCI/Nature可视化 | `references/roles/编程手/references/可视化规范.md` | 生成出版级图表 |
-| HTML面板模板 | `references/roles/编程手/references/可视化面板模板.html` | 生成图表导航面板时参考 |
-
----
-
-## 编程语言确认规则
-
-**在编写任何代码之前，必须先向用户确认使用的编程语言（Python 或 MATLAB）**，禁止在未确认的情况下直接开始编写代码。
+若实际运行证明模型公式、约束或参数定义冲突，停止通过改算法规避问题，把证据反馈给建模手。

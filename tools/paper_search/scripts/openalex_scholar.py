@@ -62,6 +62,18 @@ class Paper:
     doi: Optional[str]
     abstract: Optional[str]
     source: str = "openalex"
+    venue: Optional[str] = None
+    volume: Optional[str] = None
+    issue: Optional[str] = None
+    first_page: Optional[str] = None
+    last_page: Optional[str] = None
+    url: Optional[str] = None
+
+    @property
+    def pages(self) -> Optional[str]:
+        if self.first_page and self.last_page:
+            return f"{self.first_page}-{self.last_page}"
+        return self.first_page or self.last_page
 
     @property
     def citation_format(self) -> str:
@@ -70,8 +82,12 @@ class Paper:
         if len(self.authors) > 3:
             author_str += " et al."
         year_str = f" ({self.publication_year})" if self.publication_year else ""
-        doi_str = f" DOI: {self.doi}" if self.doi else ""
-        return f"{author_str}{year_str}. {self.title}.{doi_str}"
+        venue = f" {self.venue}" if self.venue else ""
+        volume = f", {self.volume}" if self.volume else ""
+        issue = f"({self.issue})" if self.issue else ""
+        pages = f", {self.pages}" if self.pages else ""
+        doi_str = f" https://doi.org/{self.doi}" if self.doi else ""
+        return f"{author_str}{year_str}. {self.title}.{venue}{volume}{issue}{pages}.{doi_str}".strip()
 
     def to_dict(self) -> Dict:
         """转换为字典格式"""
@@ -82,6 +98,11 @@ class Paper:
             'cited_by_count': self.cited_by_count,
             'doi': self.doi,
             'abstract': self.abstract,
+            'venue': self.venue,
+            'volume': self.volume,
+            'issue': self.issue,
+            'pages': self.pages,
+            'url': self.url,
             'citation_format': self.citation_format
         }
 
@@ -147,7 +168,7 @@ class OpenAlexScholar:
             "search": query,
             "per_page": min(max(limit, 1), 200),
             "page": max(page, 1),
-            "select": "id,display_name,authorships,cited_by_count,doi,publication_year,biblio,abstract_inverted_index",
+            "select": "id,display_name,authorships,cited_by_count,doi,publication_year,biblio,abstract_inverted_index,primary_location",
         }
 
         # 排序
@@ -245,6 +266,9 @@ class OpenAlexScholar:
             if abstract_index:
                 abstract = self._get_abstract_from_index(abstract_index)
 
+            biblio = work.get("biblio") or {}
+            location = work.get("primary_location") or {}
+            source_info = location.get("source") or {}
             paper = Paper(
                 title=work.get("display_name", "Unknown Title"),
                 authors=authors,
@@ -255,7 +279,13 @@ class OpenAlexScholar:
                     if work.get("doi") else None
                 ),
                 abstract=abstract,
-                source="openalex"
+                source="openalex",
+                venue=source_info.get("display_name"),
+                volume=biblio.get("volume"),
+                issue=biblio.get("issue"),
+                first_page=biblio.get("first_page"),
+                last_page=biblio.get("last_page"),
+                url=location.get("landing_page_url"),
             )
             papers.append(paper)
 

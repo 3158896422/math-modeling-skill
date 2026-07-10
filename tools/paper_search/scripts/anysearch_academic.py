@@ -8,6 +8,7 @@ AnySearch Academic — 基于 AnySearch API 的学术论文搜索封装
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -106,6 +107,7 @@ class AnySearchAcademic:
             try:
                 parsed = json.loads(text)
             except json.JSONDecodeError:
+                raw_items.extend(self._parse_markdown(text))
                 continue
             if isinstance(parsed, list):
                 raw_items.extend(parsed)
@@ -121,6 +123,49 @@ class AnySearchAcademic:
             if paper.get("title"):
                 papers.append(paper)
 
+        return papers
+
+    @classmethod
+    def _parse_markdown(cls, text: str) -> List[Dict[str, Any]]:
+        """解析 AnySearch MCP 当前返回的 Markdown 搜索结果。"""
+        heading = re.compile(r"(?m)^###\s+\d+[.)]\s+(.+?)\s*$")
+        matches = list(heading.finditer(text))
+        papers: List[Dict[str, Any]] = []
+        for index, match in enumerate(matches):
+            block_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+            block = text[match.end():block_end]
+            fields = {
+                key.strip().lower(): value.strip()
+                for key, value in re.findall(r"(?m)^-\s+\*\*(.+?)\*\*:\s*(.+?)\s*$", block)
+            }
+            url = fields.get("url") or fields.get("link") or ""
+            doi_match = re.search(r"(?:doi\.org/|doi:\s*)(10\.\d{4,9}/\S+)", url, re.I)
+            if not doi_match:
+                doi_match = re.search(r"\b(10\.\d{4,9}/[^\s<>)\]]+)", block, re.I)
+            year_text = fields.get("published") or fields.get("year") or block
+            year_match = re.search(r"\b(18|19|20)\d{2}\b", year_text)
+            citation_text = fields.get("citations") or fields.get("cited by") or block
+            citation_match = re.search(r"(?:cited(?:\s+by)?|citations?)\D{0,12}([\d,]+)", citation_text, re.I)
+            if not citation_match and citation_text != block:
+                citation_match = re.search(r"([\d,]+)", citation_text)
+            authors = fields.get("authors") or fields.get("author") or ""
+            if not authors:
+                prose = re.search(r"(?m)^-\s+(.+?)\s+\(((?:18|19|20)\d{2})\)", block)
+                if prose:
+                    authors = prose.group(1).strip()
+            papers.append({
+                "title": match.group(1).strip(),
+                "authors": authors,
+                "year": int(year_match.group(0)) if year_match else None,
+                "citations": int(citation_match.group(1).replace(",", "")) if citation_match else 0,
+                "doi": doi_match.group(1).rstrip(".,;") if doi_match else None,
+                "url": url or None,
+                "venue": fields.get("journal") or fields.get("venue") or fields.get("source"),
+                "volume": fields.get("volume"),
+                "issue": fields.get("issue"),
+                "pages": fields.get("pages"),
+                "abstract": fields.get("abstract") or fields.get("summary"),
+            })
         return papers
 
     # ------------------------------------------------------------------
@@ -157,6 +202,11 @@ class AnySearchAcademic:
             "citations": citations,
             "doi": doi,
             "abstract": abstract,
+            "url": raw.get("url") or raw.get("link"),
+            "venue": raw.get("venue") or raw.get("journal"),
+            "volume": raw.get("volume"),
+            "issue": raw.get("issue"),
+            "pages": raw.get("pages"),
             "source": "anysearch",
         }
 
@@ -186,7 +236,7 @@ class AnySearchAcademic:
                         result.append(name)
             return result
         if isinstance(authors_raw, str):
-            return [s.strip() for s in authors_raw.split(";") if s.strip()]
+            return [s.strip() for s in re.split(r"[;,]", authors_raw) if s.strip()]
         return []
 
     @staticmethod

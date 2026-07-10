@@ -47,6 +47,11 @@ class HybridPaper:
     doi: Optional[str]
     abstract: Optional[str]
     sources: List[str] = field(default_factory=list)
+    venue: Optional[str] = None
+    volume: Optional[str] = None
+    issue: Optional[str] = None
+    pages: Optional[str] = None
+    url: Optional[str] = None
     # sources = ["openalex"], ["anysearch"], 或 ["openalex", "anysearch"]
 
     @property
@@ -69,6 +74,11 @@ class HybridPaper:
             "abstract": self.abstract,
             "sources": self.sources,
             "cross_validated": self.cross_validated,
+            "venue": self.venue,
+            "volume": self.volume,
+            "issue": self.issue,
+            "pages": self.pages,
+            "url": self.url,
         }
 
 
@@ -206,6 +216,11 @@ class HybridScholar:
                     doi=doi,
                     abstract=oa_p.abstract,
                     sources=["openalex", "anysearch"],
+                    venue=oa_p.venue or any_p.get("venue"),
+                    volume=oa_p.volume or any_p.get("volume"),
+                    issue=oa_p.issue or any_p.get("issue"),
+                    pages=oa_p.pages or any_p.get("pages"),
+                    url=oa_p.url or any_p.get("url"),
                 ))
 
         # Step 3 — 非交叉部分（无 DOI 或单源）
@@ -222,6 +237,11 @@ class HybridScholar:
                 doi=p.doi,
                 abstract=p.abstract,
                 sources=["openalex"],
+                venue=p.venue,
+                volume=p.volume,
+                issue=p.issue,
+                pages=p.pages,
+                url=p.url,
             ))
 
         any_only: List[HybridPaper] = []
@@ -237,40 +257,125 @@ class HybridScholar:
                 doi=p.get("doi"),
                 abstract=p.get("abstract"),
                 sources=["anysearch"],
+                venue=p.get("venue"),
+                volume=p.get("volume"),
+                issue=p.get("issue"),
+                pages=p.get("pages"),
+                url=p.get("url"),
             ))
 
-        # Step 4 — 标题模糊去重（针对无 DOI 的论文）
-        oa_only, any_only = self._fuzzy_dedup(oa_only, any_only)
+        # Step 4 — 标题模糊匹配（无 DOI 论文也必须进入交叉验证结果）
+        fuzzy_cross, oa_only, any_only = self._fuzzy_dedup(oa_only, any_only)
+        cross.extend(fuzzy_cross)
 
-        # Step 5 — 排序并截断
-        cross.sort(key=lambda x: x.citations, reverse=True)
-        oa_only.sort(key=lambda x: x.citations, reverse=True)
-        any_only.sort(key=lambda x: x.citations, reverse=True)
+        # Step 5 — 按查询词覆盖率过滤，再以相关性优先、引用量次优排序。
+        terms = self._query_terms(self._current_query)
+        before_filter = len(cross) + len(oa_only) + len(any_only)
+        cross = [paper for paper in cross if self._is_relevant(paper, terms)]
+        oa_only = [paper for paper in oa_only if self._is_relevant(paper, terms)]
+        any_only = [paper for paper in any_only if self._is_relevant(paper, terms)]
+        filtered_irrelevant = before_filter - len(cross) - len(oa_only) - len(any_only)
 
-        # 等比例分配名额
-        total_needed = final_limit
-        n_cross = min(len(cross), max(2, total_needed // 3))
-        remaining = total_needed - n_cross
-        n_oa = min(len(oa_only), remaining // 2)
-        n_any = remaining - n_oa
+        before_dedup = len(cross) + len(oa_only) + len(any_only)
+        cross = self._dedup_titles(cross)
+        oa_only = self._dedup_titles(oa_only)
+        any_only = self._dedup_titles(any_only)
+        collapsed_duplicates = before_dedup - len(cross) - len(oa_only) - len(any_only)
+
+        rank = lambda paper: (self._relevance_score(paper, terms), paper.citations)
+        cross.sort(key=rank, reverse=True)
+        oa_only.sort(key=rank, reverse=True)
+        any_only.sort(key=rank, reverse=True)
+
+        # 先保留交叉验证结果，再按引用量从两个单源结果中补足名额。
+        selected_cross = cross[:final_limit]
+        remaining = max(0, final_limit - len(selected_cross))
+        unique_pool = [
+            ("openalex", paper) for paper in oa_only
+        ] + [
+            ("anysearch", paper) for paper in any_only
+        ]
+        unique_pool.sort(key=lambda item: rank(item[1]), reverse=True)
+        selected = unique_pool[:remaining]
+        selected_oa = [paper for source, paper in selected if source == "openalex"]
+        selected_any = [paper for source, paper in selected if source == "anysearch"]
 
         return {
             "query": self._current_query,
-            "cross_validated": cross[:n_cross],
-            "openalex_only": oa_only[:n_oa],
-            "anysearch_only": any_only[:n_any],
+            "cross_validated": selected_cross,
+            "openalex_only": selected_oa,
+            "anysearch_only": selected_any,
             "stats": {
                 "openalex_total": len(oa_papers),
                 "anysearch_total": len(any_papers),
                 "cross_validated": len(cross),
                 "openalex_unique": len(oa_only),
                 "anysearch_unique": len(any_only),
+                "filtered_irrelevant": filtered_irrelevant,
+                "collapsed_duplicates": collapsed_duplicates,
             },
         }
 
+    @staticmethod
+    def _normalized_title(title: str) -> str:
+        return " ".join(re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", title.lower()).split())
+
+    @classmethod
+    def _dedup_titles(cls, papers: List[HybridPaper]) -> List[HybridPaper]:
+        chosen: Dict[str, HybridPaper] = {}
+        for paper in papers:
+            key = cls._normalized_title(paper.title) or paper.doi or paper.url or str(id(paper))
+            current = chosen.get(key)
+            if current is None or (paper.citations, bool(paper.abstract), bool(paper.venue)) > (
+                current.citations, bool(current.abstract), bool(current.venue)
+            ):
+                chosen[key] = paper
+        return list(chosen.values())
+
+    @staticmethod
+    def _query_terms(query: str) -> List[str]:
+        """提取具有检索意义的词；连字符术语同时按组成词匹配。"""
+        stopwords = {
+            "a", "an", "and", "for", "in", "of", "on", "or", "the", "to", "with",
+            "analysis", "based", "method", "model", "study", "using",
+        }
+        normalized = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", query.lower())
+        return [term for term in normalized.split() if term not in stopwords and len(term) > 1]
+
+    @staticmethod
+    def _paper_text(paper: HybridPaper) -> tuple[str, str]:
+        title = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", paper.title.lower())
+        detail = " ".join(filter(None, [paper.abstract, paper.venue])).lower()
+        detail = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", detail)
+        return f" {title} ", f" {detail} "
+
+    @classmethod
+    def _matched_terms(cls, paper: HybridPaper, terms: List[str]) -> Set[str]:
+        title, detail = cls._paper_text(paper)
+        return {
+            term for term in terms
+            if f" {term} " in title or f" {term} " in detail
+        }
+
+    @classmethod
+    def _is_relevant(cls, paper: HybridPaper, terms: List[str]) -> bool:
+        # 单个词可能是 AHP、PCA 等缩写，无法仅凭字面覆盖率安全淘汰结果。
+        if len(terms) < 2:
+            return True
+        required = min(2, len(terms))
+        return len(cls._matched_terms(paper, terms)) >= required
+
+    @classmethod
+    def _relevance_score(cls, paper: HybridPaper, terms: List[str]) -> int:
+        title, detail = cls._paper_text(paper)
+        return sum(
+            3 if f" {term} " in title else 1 if f" {term} " in detail else 0
+            for term in terms
+        )
+
     def _fuzzy_dedup(self, oa_only: List[HybridPaper],
-                     any_only: List[HybridPaper]) -> Tuple[List[HybridPaper], List[HybridPaper]]:
-        """基于标题相似度的模糊去重（针对无 DOI 论文）。"""
+                     any_only: List[HybridPaper]) -> Tuple[List[HybridPaper], List[HybridPaper], List[HybridPaper]]:
+        """把高度相似且年份相容的无 DOI 记录合并为交叉验证论文。"""
         def normalize(title: str) -> str:
             t = title.lower().strip()
             t = re.sub(r'[^\w\s]', '', t)
@@ -286,21 +391,35 @@ class HybridScholar:
         # 检查 oa_only 中的标题与 any_only 中的标题
         kept_oa = list(oa_only)
         kept_any = list(any_only)
+        cross: List[HybridPaper] = []
 
         for hp in oa_only:
-            if hp.doi:
-                continue
             for ap in any_only:
-                if ap.doi:
+                if hp.doi and ap.doi:
                     continue
-                if overlap(hp.title, ap.title) >= 0.7:
-                    # 高相似度 → 合并到交叉验证，从单源列表中移除
+                same_year = not hp.year or not ap.year or hp.year == ap.year
+                if same_year and overlap(hp.title, ap.title) >= 0.85:
                     if hp in kept_oa:
                         kept_oa.remove(hp)
                     if ap in kept_any:
                         kept_any.remove(ap)
+                    cross.append(HybridPaper(
+                        title=hp.title,
+                        authors=hp.authors or ap.authors,
+                        year=hp.year or ap.year,
+                        citations=max(hp.citations, ap.citations),
+                        doi=hp.doi or ap.doi,
+                        abstract=hp.abstract or ap.abstract,
+                        sources=["openalex", "anysearch"],
+                        venue=hp.venue or ap.venue,
+                        volume=hp.volume or ap.volume,
+                        issue=hp.issue or ap.issue,
+                        pages=hp.pages or ap.pages,
+                        url=hp.url or ap.url,
+                    ))
+                    break
 
-        return kept_oa, kept_any
+        return cross, kept_oa, kept_any
 
     # ------------------------------------------------------------------
     # 展示

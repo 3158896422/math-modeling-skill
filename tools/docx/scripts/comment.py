@@ -19,6 +19,7 @@ import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import defusedxml.minidom
 
@@ -83,6 +84,10 @@ def _encode_smart_quotes(text: str) -> str:
     return text
 
 
+def _escape_attribute(text: str) -> str:
+    return escape(str(text), {'"': "&quot;", "'": "&apos;"})
+
+
 def _append_xml(xml_path: Path, root_tag: str, content: str) -> None:
     dom = defusedxml.minidom.parseString(xml_path.read_text(encoding="utf-8"))
     root = dom.getElementsByTagName(root_tag)[0]
@@ -103,6 +108,16 @@ def _find_para_id(comments_path: Path, comment_id: int) -> str | None:
                 if pid := p.getAttribute("w14:paraId"):
                     return pid
     return None
+
+
+def _has_comment_id(comments_path: Path, comment_id: int) -> bool:
+    if not comments_path.exists():
+        return False
+    dom = defusedxml.minidom.parseString(comments_path.read_text(encoding="utf-8"))
+    return any(
+        node.getAttribute("w:id") == str(comment_id)
+        for node in dom.getElementsByTagName("w:comment")
+    )
 
 
 def _get_next_rid(rels_path: Path) -> int:
@@ -227,10 +242,18 @@ def add_comment(
     if not word.exists():
         return "", f"Error: {word} not found"
 
+    comments = word / "comments.xml"
+    if comment_id < 0:
+        return "", "Error: Comment ID must be non-negative"
+    if _has_comment_id(comments, comment_id):
+        return "", f"Error: Comment ID {comment_id} already exists"
+    if parent_id is not None:
+        if not comments.exists() or not _find_para_id(comments, parent_id):
+            return "", f"Error: Parent comment {parent_id} not found"
+
     para_id, durable_id = _generate_hex_id(), _generate_hex_id()
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    comments = word / "comments.xml"
     first_comment = not comments.exists()
     if first_comment:
         shutil.copy(TEMPLATE_DIR / "comments.xml", comments)
@@ -241,11 +264,11 @@ def add_comment(
         "w:comments",
         COMMENT_XML.format(
             id=comment_id,
-            author=author,
+            author=_escape_attribute(author),
             date=ts,
-            initials=initials,
+            initials=_escape_attribute(initials),
             para_id=para_id,
-            text=text,  
+            text=escape(text),
         ),
     )
 
@@ -254,8 +277,6 @@ def add_comment(
         shutil.copy(TEMPLATE_DIR / "commentsExtended.xml", ext)
     if parent_id is not None:
         parent_para = _find_para_id(comments, parent_id)
-        if not parent_para:
-            return "", f"Error: Parent comment {parent_id} not found"
         _append_xml(
             ext,
             "w15:commentsEx",

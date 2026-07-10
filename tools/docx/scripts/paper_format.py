@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Tiny python-docx helpers for the default math-modeling paper format."""
 
+import os
 import re
 import sys
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from docx import Document
@@ -12,8 +14,11 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt
+from docx.shared import Cm, Inches, Pt
 from lxml import etree
+
+
+SKILL_ROOT = Path(__file__).resolve().parents[3]
 
 
 def set_run_font(run, font="宋体", size=12, bold=False):
@@ -27,14 +32,54 @@ def set_run_font(run, font="宋体", size=12, bold=False):
     return run
 
 
-def setup_page(doc):
+@dataclass(frozen=True)
+class ContestProfile:
+    name: str
+    paper: str
+    margins: tuple[float, float, float, float]
+    required_markers: tuple[str, ...]
+    rules_source: str
+
+
+CONTEST_PROFILES = {
+    "cumcm": ContestProfile(
+        name="全国大学生数学建模竞赛",
+        paper="A4",
+        margins=(2.54, 2.54, 3.18, 3.18),
+        required_markers=("摘 要", "关键词："),
+        rules_source="http://www.mcm.edu.cn/",
+    ),
+    "mcm-icm": ContestProfile(
+        name="MCM/ICM",
+        paper="LETTER",
+        margins=(2.54, 2.54, 2.54, 2.54),
+        required_markers=("Summary",),
+        rules_source="https://www.comap.com/contests/mcm-icm",
+    ),
+}
+
+
+def get_profile(contest="cumcm"):
+    try:
+        return CONTEST_PROFILES[contest.lower()]
+    except KeyError as exc:
+        raise ValueError(f"未知竞赛配置: {contest}") from exc
+
+
+def setup_page(doc, contest="cumcm"):
+    profile = get_profile(contest)
     section = doc.sections[0]
-    section.page_width = Cm(21)
-    section.page_height = Cm(29.7)
-    section.top_margin = Cm(2.54)
-    section.bottom_margin = Cm(2.54)
-    section.left_margin = Cm(3.18)
-    section.right_margin = Cm(3.18)
+    if profile.paper == "LETTER":
+        section.page_width = Inches(8.5)
+        section.page_height = Inches(11)
+    else:
+        section.page_width = Cm(21)
+        section.page_height = Cm(29.7)
+    top, bottom, left, right = profile.margins
+    section.top_margin = Cm(top)
+    section.bottom_margin = Cm(bottom)
+    section.left_margin = Cm(left)
+    section.right_margin = Cm(right)
 
 
 def paragraph(doc, text="", align=None, first_line=False, line_spacing=1.25):
@@ -210,13 +255,214 @@ def three_line_table(doc, rows):
     return table
 
 
-def new_document():
-    doc = Document()
+def _clear_template_body(doc):
+    body_element = doc._element.body
+    for child in list(body_element):
+        if child.tag != qn("w:sectPr"):
+            body_element.remove(child)
+
+
+def new_document(contest="cumcm", template_path=None, preserve_template_content=False):
+    """从空白文档或参考模板创建论文，可保留官方模板的固定正文。"""
+    doc = Document(str(template_path)) if template_path else Document()
+    if template_path and not preserve_template_content:
+        _clear_template_body(doc)
     zoom = doc.settings.element.find(qn("w:zoom"))
     if zoom is not None and zoom.get(qn("w:percent")) is None:
         zoom.set(qn("w:percent"), "100")
-    setup_page(doc)
+    if not template_path:
+        setup_page(doc, contest)
     return doc
+
+
+def _document_texts(doc):
+    texts = [paragraph.text.strip() for paragraph in doc.paragraphs if paragraph.text.strip()]
+    for table in doc.tables:
+        for row in table.rows:
+            texts.extend(cell.text.strip() for cell in row.cells if cell.text.strip())
+    return texts
+
+
+def _content_units(text):
+    """按中文字符和连续拉丁字母/数字词计数，用于中英文混排篇幅预警。"""
+    return len(re.findall(r"[\u4e00-\u9fff]|[A-Za-z0-9]+", text))
+
+
+def _numbered_object_issues(doc, kind, object_count):
+    caption_pattern = re.compile(rf"^\s*{kind}\s*(\d+)(?!\d)")
+    reference_pattern = re.compile(rf"{kind}\s*(\d+)(?!\d)")
+    captions = {}
+    body_references = set()
+    for paragraph in doc.paragraphs:
+        text = paragraph.text.strip()
+        caption = caption_pattern.match(text)
+        if caption:
+            captions[int(caption.group(1))] = text
+        else:
+            body_references.update(int(number) for number in reference_pattern.findall(text))
+
+    issues = []
+    expected = set(range(1, object_count + 1))
+    missing_captions = sorted(expected - set(captions))
+    if missing_captions:
+        issues.append(f"{kind}编号不完整，缺少题注: {missing_captions}")
+    extra_captions = sorted(set(captions) - expected)
+    if extra_captions:
+        issues.append(f"{kind}题注没有对应对象或编号跳跃: {extra_captions}")
+    for number in sorted(set(captions) - body_references):
+        issues.append(f"{kind}{number} 已插入但未在正文引用")
+    return issues
+
+
+def _reference_issues(paragraphs):
+    split_at = next(
+        (index for index, p in enumerate(paragraphs) if p.text.strip().lower() in {"参考文献", "references"}),
+        None,
+    )
+    if split_at is None:
+        return ["未找到参考文献章节"]
+    body = "\n".join(p.text for p in paragraphs[:split_at])
+    bibliography = [p.text.strip() for p in paragraphs[split_at + 1:] if p.text.strip()]
+    cited = set()
+    for group in re.findall(r"\[([0-9,，\-–—\s]+)\]", body):
+        for item in re.split(r"[,，]", group):
+            item = item.strip()
+            if not item:
+                continue
+            bounds = re.split(r"[\-–—]", item)
+            if len(bounds) == 2 and all(bound.strip().isdigit() for bound in bounds):
+                start, end = (int(bound.strip()) for bound in bounds)
+                if start <= end:
+                    cited.update(range(start, end + 1))
+            elif item.isdigit():
+                cited.add(int(item))
+    listed = {
+        int(match.group(1))
+        for text in bibliography
+        if (match := re.match(r"^\[(\d+)\]", text))
+    }
+    issues = [f"正文引用 [{number}] 未出现在参考文献表" for number in sorted(cited - listed)]
+    issues.extend(f"参考文献 [{number}] 未在正文引用" for number in sorted(listed - cited))
+    return issues
+
+
+def validate_paper_structure(
+    doc,
+    contest="cumcm",
+    *,
+    quality_checks=True,
+    min_content_units=None,
+    min_equations=None,
+    min_figures=None,
+    min_tables=None,
+    rendered_pages=None,
+    target_pages=None,
+    official_max_pages=None,
+    require_rendered_pages=True,
+):
+    """检查官方结构、篇幅目标、公式图表、编号引用和参考文献对应关系。"""
+    profile = get_profile(contest)
+    texts = [paragraph.text.strip() for paragraph in doc.paragraphs if paragraph.text.strip()]
+    errors = []
+    if not texts:
+        errors.append("缺少论文标题")
+    full_text = "\n".join(texts)
+    for marker in profile.required_markers:
+        if marker == "Summary":
+            present = any(text.lower() in {"summary", "summary sheet"} for text in texts)
+        elif marker.endswith("："):
+            present = any(text.startswith(marker) for text in texts)
+        else:
+            present = marker in texts
+        if not present:
+            label = "摘要" if marker == "摘 要" else "关键词" if marker == "关键词：" else marker
+            errors.append(f"缺少官方结构项: {label}")
+    if "[待补充" in full_text:
+        errors.append("论文仍含 [待补充] 占位符")
+    if not quality_checks:
+        return errors
+
+    if contest.lower() == "cumcm":
+        min_content_units = 15000 if min_content_units is None else min_content_units
+        min_equations = 5 if min_equations is None else min_equations
+        min_figures = 3 if min_figures is None else min_figures
+        min_tables = 3 if min_tables is None else min_tables
+        target_pages = 20 if target_pages is None else target_pages
+        official_max_pages = 30 if official_max_pages is None else official_max_pages
+    else:
+        min_content_units = 0 if min_content_units is None else min_content_units
+        min_equations = 0 if min_equations is None else min_equations
+        min_figures = 0 if min_figures is None else min_figures
+        min_tables = 0 if min_tables is None else min_tables
+
+    all_text = "\n".join(_document_texts(doc))
+    units = _content_units(all_text)
+    equations = len(doc._element.findall(f".//{qn('m:oMath')}"))
+    figures = len(doc._element.findall(f".//{qn('a:blip')}"))
+    tables = len(doc.tables)
+    if units < min_content_units:
+        errors.append(
+            f"预警：正文约 {units} 字词单位，低于 {min_content_units} 的质量目标；"
+            "该目标不是 CUMCM 官方最低字数，可按当届规则或用户要求覆盖"
+        )
+    if equations < min_equations:
+        errors.append(f"预警：仅检测到 {equations} 个可编辑公式，低于质量目标 {min_equations}")
+    if figures < min_figures:
+        errors.append(f"预警：仅检测到 {figures} 幅图，低于质量目标 {min_figures}")
+    if tables < min_tables:
+        errors.append(f"预警：仅检测到 {tables} 个表，低于质量目标 {min_tables}")
+
+    errors.extend(_numbered_object_issues(doc, "图", figures))
+    errors.extend(_numbered_object_issues(doc, "表", tables))
+    errors.extend(_reference_issues(doc.paragraphs))
+
+    if rendered_pages is None and require_rendered_pages and target_pages is not None:
+        errors.append(
+            f"预警：未提供渲染页数，无法检查约 {target_pages} 页质量目标和 "
+            f"{official_max_pages} 页官方上限"
+        )
+    elif rendered_pages is not None:
+        if target_pages is not None and rendered_pages < target_pages:
+            errors.append(
+                f"预警：渲染后共 {rendered_pages} 页，低于约 {target_pages} 页质量目标；"
+                "该目标不是官方最低页数"
+            )
+        if official_max_pages is not None and rendered_pages > official_max_pages:
+            errors.append(
+                f"渲染后共 {rendered_pages} 页，超过当前核验的官方上限 {official_max_pages} 页"
+            )
+    return errors
+
+
+def _is_within(path, parent):
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def save_document(doc, project_root, filename="完整论文.docx", contest="cumcm", overwrite=False):
+    """校验后原子保存到 PROJECT_ROOT，并拒绝写入 Skill 目录。"""
+    project = Path(project_root).resolve()
+    if _is_within(project, SKILL_ROOT):
+        raise ValueError("PROJECT_ROOT 不能位于 SKILL_ROOT 内部")
+    output = (project / filename).resolve()
+    if not _is_within(output, project):
+        raise ValueError("论文输出必须位于 PROJECT_ROOT 内部")
+    if _is_within(output, SKILL_ROOT):
+        raise ValueError("论文输出不能位于 SKILL_ROOT 内部")
+    issues = validate_paper_structure(doc, contest)
+    errors = [issue for issue in issues if not issue.startswith("预警：")]
+    if errors:
+        raise ValueError("论文结构校验失败: " + "；".join(errors))
+    if output.exists() and not overwrite:
+        raise FileExistsError(f"输出已存在，未覆盖: {output}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.name}.tmp")
+    doc.save(temporary)
+    os.replace(temporary, output)
+    return output
 
 
 if __name__ == "__main__":
