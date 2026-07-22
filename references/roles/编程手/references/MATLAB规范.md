@@ -58,4 +58,12 @@ python ../scripts/repro_manifest.py `
   --command 'matlab -batch "main(42)"'
 ```
 
-图使用 `exportgraphics` 输出 SVG 与 300 DPI PNG，不使用网格线。
+## 出版级绘图
+
+将 `ROLE_ROOT/scripts/apply_publication_style.m` 与 `export_publication_figure.m` 复制到 `PROJECT_ROOT/utils/`，再由项目代码 `addpath` 调用。绘图前同样完成数据剖析与图表契约，不能把 MATLAB 作为低配可视化分支。
+
+- `apply_publication_style(fig, "zh", "report")` 统一字体、色觉友好配色、线宽、最终尺寸和无网格线基线。
+- `export_publication_figure(fig, outputStem, 300)` 同时输出 SVG 与 300 DPI PNG。
+- 官方模板规定的尺寸、字体和格式优先；覆盖内置值时记录实际参数。
+- 导出后运行 Python 标准库审计器 `figure_audit.py`，并实际打开 PNG 检查缺字、裁切、遮挡、尺度和多面板一致性。
+- MATLAB 不得调用 `grid on`；确有数值意义的参考线使用 `xline`/`yline` 并在图注说明。

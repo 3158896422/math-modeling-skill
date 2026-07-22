@@ -30,6 +30,7 @@
 - 🧠 **建模分析**：读题、检查附件、拆分子问题、选择模型、设计求解与验证方案。
 - 💻 **双语言实现**：支持 Python 和 MATLAB，按选中的模型与功能动态检查依赖。
 - 📊 **完整结果输出**：生成结果表格、原始数据图、模型运行过程图和最终结果图。
+- 🎨 **出版级科学可视化**：先剖析数据和论证目标再选图，提供 Python/MATLAB 统一样式、色觉友好编码、SVG + 300 DPI PNG 导出与成图自检闭环。
 - 🔁 **可复现运行**：记录随机种子、输入文件 SHA-256、运行时与依赖版本、关键参数和唯一复现命令。
 - 🔎 **双引擎论文搜索**：并行调用 OpenAlex 与 AnySearch，按 DOI 或题名交叉核验。
 - 📄 **Word / LaTeX 论文生成**：支持官方模板、整篇 LaTeX→DOCX、Word 原生 OMML 公式、完整 LaTeX 源码项目、真实 PDF 编译、篇幅与图文引用检查。
@@ -38,7 +39,7 @@
 ## 🔄 三阶段工作流
 
 <div align="center">
-  <img src="imgs/三角色流程图.png" alt="三角色协作流程图" width="85%">
+  <img src="imgs/三角色流程图-修正版.png" alt="三角色协作与反馈闭环" width="100%">
 </div>
 
 | 阶段 | 角色 | 核心任务 | 固定交付物 |
@@ -117,7 +118,8 @@ PROJECT_ROOT/
 ├── figures/
 │   ├── raw_*.svg / raw_*.png
 │   ├── process_*.svg / *.png
-│   └── result_*.svg / *.png
+│   ├── result_*.svg / *.png
+│   └── _qa/                       # 自动生成的灰度质检预览
 ├── 完整论文.docx                 # 默认交付的 Word 论文
 ├── 完整论文-LaTeX/               # 默认交付的 LaTeX 源码项目
 │   ├── main.tex
@@ -214,6 +216,17 @@ LaTeX：
 
 CUMCM 默认以约 15000 字词单位、约 20 页作为完整度质量目标，但这不是官方最低要求。以 2026 年官方规范为例，摘要原则上不超过一页、正文不超过 30 页；实际交付必须重新核对目标届次的官方文件。校验器还会检查公式、图、表的基本数量，图表题注与正文引用，以及参考文献和正文引用是否双向对应。
 
+## 🎨 科学可视化
+
+编程手不再从“喜欢哪种图”或现成模板出发，而是先核对数据结构、样本量、缺失、分布、异常值和单位，再为每张候选图明确结论、证据映射、统计口径与最终尺寸。默认采用克制、清晰、可编辑的 Nature/SCI 风格基线，但目标竞赛、学校或期刊的当届官方规范优先。
+
+- Python 与 MATLAB 均提供统一字体、色觉友好调色板、线宽、面板和最终尺寸工具。
+- 原始数据图、模型运行过程图和最终结果图均可生成多个候选版本，不设置图数上限。
+- 数据图按最终物理尺寸同时导出带可编辑文本的 SVG 与至少 300 DPI PNG，不用紧边界裁切破坏尺寸契约。
+- 导出前检查缺字、文字裁切和刻度重叠；导出后自动生成灰度预览，并审计三类图、格式配对、PNG DPI、物理尺寸和 SVG 文本。
+- Agent 必须实际打开彩色图和灰度预览，检查遮挡、尺度、颜色区分和跨面板一致性；发现问题后回到代码重绘。
+- “Nature/SCI 风格”是设计与质检基线，不是对任何期刊规范的替代或官方认证。
+
 ## 📸 示例展示
 
 以下图表展示本项目可视化规范生成的候选图效果。
@@ -275,7 +288,7 @@ python tools/docx/scripts/self_check.py
 python -m compileall -q tools references/roles/编程手/scripts
 ```
 
-回归测试覆盖双引擎搜索、公式转换、DOCX、LaTeX 模板与校验、Excel 重算、论文结构、动态依赖和复现清单。
+回归测试覆盖双引擎搜索、公式转换、DOCX、LaTeX 模板与校验、Excel 重算、论文结构、动态依赖、复现清单和科学绘图工具。
 
 ## 📋 版本与更新日志
 
@@ -303,6 +316,7 @@ python -m compileall -q tools references/roles/编程手/scripts
 
 - [AnySearch Skill](https://github.com/anysearch-ai/anysearch-skill)：为学术垂直搜索提供参考。
 - [Nature Skills](https://github.com/Yuan1z0825/nature-skills)：为科学可视化与写作方法提供参考。
+- [SciPilot Figure Skill](https://github.com/Haojae/scipilot-figure-skill)：为数据剖析、图型决策、色觉可达性和成图自检闭环提供参考。
 
 ---
 
