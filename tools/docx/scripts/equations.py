@@ -21,17 +21,23 @@ LaTeX 方程 → Word OMML 公式转换工具
 
     # 从 Markdown 生成 docx（含公式）
     python equations.py generate paper.md -o paper.docx --template template.docx
+
+    # 将完整 LaTeX 论文转换为 docx
+    python equations.py convert-latex main.tex -o paper.docx --template template.docx
 """
 
 import argparse
 import copy
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
+
+SKILL_ROOT = Path(__file__).resolve().parents[3]
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -658,32 +664,86 @@ def batch_replace(doc_path: str, mapping: dict, output_path: str):
 
 
 # ---------------------------------------------------------------------------
-# 从 Markdown 生成 docx（使用 pandoc 后端）
+# 使用 Pandoc 生成 docx
 # ---------------------------------------------------------------------------
 
-def markdown_to_docx(md_path: str, output_path: str, template_path: str = None):
-    """
-    使用 pandoc 将 Markdown 文件（含 $$ LaTeX $$）转换为 .docx。
+def _pandoc_to_docx(source_path, output_path, source_format, template_path=None):
+    source = Path(source_path).resolve()
+    output = Path(output_path).resolve()
+    expected_suffix = ".tex" if source_format == "latex" else ".md"
+    if not source.is_file() or source.suffix.casefold() != expected_suffix:
+        raise FileNotFoundError(f"输入文件不存在或不是 {expected_suffix}：{source}")
+    if output.suffix.casefold() != ".docx":
+        raise ValueError("输出文件必须使用 .docx 扩展名")
+    if output == SKILL_ROOT or SKILL_ROOT in output.parents:
+        raise ValueError("拒绝向 SKILL_ROOT 写入 DOCX")
+    if output.exists():
+        raise FileExistsError(f"输出已存在，拒绝覆盖：{output}")
 
-    pandoc 原生支持 LaTeX 方程 → Word OMML 转换，这是最可靠的方式。
+    template = Path(template_path).resolve() if template_path else None
+    if template is not None and (
+        not template.is_file() or template.suffix.casefold() != ".docx"
+    ):
+        raise FileNotFoundError(f"DOCX 参考模板不存在：{template}")
+    executable = shutil.which("pandoc")
+    if executable is None:
+        raise RuntimeError("未找到 pandoc，无法转换为 DOCX")
 
-    需安装 pandoc: https://pandoc.org/installing.html
-    """
-    cmd = ["pandoc", str(md_path), "-o", str(output_path)]
-    if template_path:
-        cmd.extend(["--reference-doc", str(template_path)])
-
-    print(f"运行: {' '.join(cmd)}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=output.parent, suffix=".docx", delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+    command = [
+        executable,
+        "--from",
+        source_format,
+        "--to",
+        "docx",
+        "--standalone",
+        "--citeproc",
+        str(source),
+        "--output",
+        str(temporary),
+        f"--resource-path={source.parent}",
+    ]
+    if template is not None:
+        command.extend(["--reference-doc", str(template)])
+    warnings = []
     try:
-        subprocess.run(cmd, check=True)
-        print(f"OK 已生成: {output_path}")
-    except FileNotFoundError:
-        print("错误: pandoc 未安装。请安装: https://pandoc.org/installing.html", file=sys.stderr)
-        print("  或使用 batch_replace 模式对现有 .docx 注入公式。", file=sys.stderr)
-        sys.exit(1)
-    except subprocess.CalledProcessError as e:
-        print(f"错误: pandoc 转换失败: {e}", file=sys.stderr)
-        sys.exit(1)
+        completed = subprocess.run(
+            command,
+            cwd=source.parent,
+            check=False,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=120,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()[-2000:]
+            raise RuntimeError(f"Pandoc 转换失败：{detail or completed.returncode}")
+        warnings = [
+            line.strip() for line in completed.stderr.splitlines() if line.strip()
+        ]
+        Document(temporary)
+        temporary.replace(output)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Pandoc 转换超时") from error
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return {"output_path": str(output), "warnings": warnings}
+
+
+def markdown_to_docx(md_path: str, output_path: str, template_path: str = None):
+    """将含 LaTeX 公式的 Markdown 转换为 DOCX。"""
+    return _pandoc_to_docx(md_path, output_path, "markdown", template_path)
+
+
+def latex_to_docx(tex_path: str, output_path: str, template_path: str = None):
+    """将完整 LaTeX 文档转换为 DOCX，公式由 Pandoc 写为原生 OMML。"""
+    return _pandoc_to_docx(tex_path, output_path, "latex", template_path)
 
 
 # ---------------------------------------------------------------------------
@@ -726,6 +786,12 @@ def build_parser():
     gn.add_argument("--output", "-o", required=True, help="输出 .docx 路径")
     gn.add_argument("--template", "-t", help="pandoc 参考模板 .docx")
 
+    # ---- 模式 3: convert-latex（从完整 LaTeX 文档生成） ----
+    cv = sub.add_parser("convert-latex", help="将完整 LaTeX 文档转换为 .docx")
+    cv.add_argument("input", help="LaTeX 主入口 .tex 文件")
+    cv.add_argument("--output", "-o", required=True, help="输出 .docx 路径")
+    cv.add_argument("--template", "-t", help="pandoc 参考模板 .docx")
+
     return parser
 
 
@@ -764,10 +830,30 @@ def main():
         batch_replace(args.input, mapping, output)
 
     elif args.mode == "generate":
-        markdown_to_docx(
-            args.input, args.output,
-            template_path=args.template,
-        )
+        try:
+            result = markdown_to_docx(
+                args.input, args.output,
+                template_path=args.template,
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"错误：{error}", file=sys.stderr)
+            sys.exit(1)
+        print(f"已生成：{result['output_path']}")
+        for warning in result["warnings"]:
+            print(f"Pandoc 警告：{warning}", file=sys.stderr)
+
+    elif args.mode == "convert-latex":
+        try:
+            result = latex_to_docx(
+                args.input, args.output,
+                template_path=args.template,
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"错误：{error}", file=sys.stderr)
+            sys.exit(1)
+        print(f"已生成：{result['output_path']}")
+        for warning in result["warnings"]:
+            print(f"Pandoc 警告：{warning}", file=sys.stderr)
 
     else:
         parser.print_help()

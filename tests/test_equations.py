@@ -1,6 +1,9 @@
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from docx import Document
 from lxml import etree
@@ -9,7 +12,7 @@ from lxml import etree
 SCRIPTS = Path(__file__).resolve().parents[1] / "tools" / "docx" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from equations import OMML_NS, latex2omml, replace_placeholder
+from equations import OMML_NS, latex2omml, latex_to_docx, replace_placeholder
 
 
 class EquationConversionTests(unittest.TestCase):
@@ -90,6 +93,50 @@ class EquationConversionTests(unittest.TestCase):
 
         self.assertEqual(replaced, 1)
         self.assertNotIn("EQ", cell.text)
+
+    def test_converts_complete_latex_to_docx_with_pandoc_atomically(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "main.tex"
+            source.write_text(
+                r"\documentclass{article}\begin{document}$x^2$\end{document}",
+                encoding="utf-8",
+            )
+            template = root / "template.docx"
+            Document().save(template)
+            output = root / "paper.docx"
+            observed = []
+
+            def fake_run(command, **kwargs):
+                observed.append((command, kwargs))
+                generated = Path(command[command.index("--output") + 1])
+                document = Document()
+                document.add_paragraph("converted")
+                document.save(generated)
+                return subprocess.CompletedProcess(
+                    command, 0, stdout="", stderr="conversion warning"
+                )
+
+            with patch("equations.shutil.which", return_value="pandoc"), patch(
+                "equations.subprocess.run", side_effect=fake_run
+            ):
+                result = latex_to_docx(source, output, template)
+
+            command, options = observed[0]
+            self.assertEqual(command[command.index("--from") + 1], "latex")
+            self.assertIn("--citeproc", command)
+            self.assertIn(f"--resource-path={source.parent}", command)
+            self.assertIn("--reference-doc", command)
+            self.assertEqual(options["cwd"], source.parent)
+            self.assertTrue(output.is_file())
+            self.assertEqual(result["warnings"], ["conversion warning"])
+            self.assertEqual(
+                {path.name for path in root.iterdir()},
+                {"main.tex", "template.docx", "paper.docx"},
+            )
+
+            with self.assertRaises(FileExistsError):
+                latex_to_docx(source, output, template)
 
 
 if __name__ == "__main__":

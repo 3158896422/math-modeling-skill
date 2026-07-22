@@ -1,6 +1,6 @@
 ---
 name: DOCX工具
-description: 创建、编辑、校验和转换 Word DOCX，支持数学建模论文模板、原生公式、三线表、修订和批注。
+description: 创建、编辑、校验和转换 Word DOCX，支持把完整 LaTeX 论文转换为 DOCX，以及数学建模论文模板、原生公式、三线表、修订和批注。
 ---
 
 # DOCX 工具
@@ -66,6 +66,19 @@ python scripts/equations.py generate "论文.md" `
 
 转换后仍须校验和渲染抽检。
 
+## 完整 LaTeX 论文转 DOCX
+
+此功能需要预先安装 [Pandoc](https://pandoc.org/installing.html)，并保证 `pandoc` 命令可用；可先运行 `python scripts/check_env.py` 检查。工具将 `.tex` 主入口转换为 DOCX，从 LaTeX 项目目录读取相对图片，使用 citeproc 处理 BibTeX 引用，并把公式写为可编辑 OMML。传入当届官方 DOCX 作为参考模板，以继承 Word 样式和页面设置：
+
+```powershell
+python scripts/equations.py convert-latex `
+  "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" `
+  --output "<PROJECT_ROOT>/完整论文.docx" `
+  --template "<PROJECT_ROOT>/当届官方模板.docx"
+```
+
+默认拒绝覆盖已有输出。Pandoc 警告必须逐项检查；自定义宏、LaTeX 专用环境、浮动体位置、交叉引用和参考文献样式可能需要在 Word 中修正。未提供 CSL 时 citeproc 使用 Pandoc 默认引文样式，因此竞赛要求特定引文格式时仍须在 Word 中核对。转换完成后必须执行 DOCX 结构校验和渲染抽检，不能把“成功生成文件”等同于版式合格。
+
 ## 解包、校验与重打包
 
 DOCX/XLSX 共用的 OOXML 基础工具只保留在 `scripts/office/`：
@@ -101,6 +114,7 @@ python scripts/comment.py "<PROJECT_ROOT>/unpacked" 1 "回复意见" --parent 0
 python scripts/check_env.py
 python scripts/self_check.py
 python scripts/office/validate.py "<PROJECT_ROOT>/完整论文.docx"
+python scripts/paper_format.py validate "<PROJECT_ROOT>/完整论文.docx" --contest cumcm --rendered-pages <DOCX实际渲染页数>
 ```
 
-调用 `validate_paper_structure()` 检查官方前置结构、篇幅质量目标、公式/图/表数量、图表编号与正文引用、参考文献双向对应，并传入渲染后的实际页数。CUMCM 默认的 15000 字词单位和约 20 页只是质量目标；以 2026 年官方规范为例，正文不超过 30 页才是硬约束。结构校验后，把 DOCX 渲染成 PDF 或图片抽检分页、公式、表格、图片、页眉页脚和字体替换。
+`paper_format.py validate` 输出结构化指标，并在官方前置结构、篇幅质量目标、公式/图/表数量、图表编号与正文引用、参考文献双向对应或实际页数任一不满足时返回非零退出码。CUMCM 默认的 15000 字词单位和约 20 页只是质量目标；以 2026 年官方规范为例，正文不超过 30 页才是硬约束。只有当届官方规则或用户明确要求允许偏离时才能调整目标并记录依据。结构校验后，把 DOCX 渲染成 PDF 或图片抽检分页、公式、表格、图片、页眉页脚和字体替换。

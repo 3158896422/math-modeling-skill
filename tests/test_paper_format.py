@@ -149,6 +149,17 @@ class PaperFormatTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "PROJECT_ROOT"):
             pf.save_document(doc, pf.SKILL_ROOT, contest="cumcm")
 
+    def test_completion_gate_rejects_incomplete_docx(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "完整论文.docx"
+            self._front_matter().save(path)
+
+            report = pf.validate_document(path, contest="cumcm", rendered_pages=7)
+
+        self.assertFalse(report["passed"])
+        self.assertLess(report["metrics"]["content_units"], 15000)
+        self.assertTrue(any("15000" in issue for issue in report["issues"]))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Tiny python-docx helpers for the default math-modeling paper format."""
 
+import argparse
+import json
 import os
 import re
 import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 from docx import Document
 from docx.enum.section import WD_SECTION
@@ -465,14 +471,50 @@ def save_document(doc, project_root, filename="完整论文.docx", contest="cumc
     return output
 
 
+def validate_document(path, *, contest="cumcm", rendered_pages=None):
+    """校验现有 DOCX，并返回可供完成门禁使用的结构化结果。"""
+    source = Path(path).resolve()
+    if not source.is_file() or source.suffix.casefold() != ".docx":
+        raise FileNotFoundError(f"DOCX 论文不存在：{source}")
+    doc = Document(source)
+    issues = validate_paper_structure(
+        doc,
+        contest,
+        quality_checks=True,
+        rendered_pages=rendered_pages,
+        require_rendered_pages=True,
+    )
+    text = "\n".join(_document_texts(doc))
+    return {
+        "path": str(source),
+        "metrics": {
+            "content_units": _content_units(text),
+            "rendered_pages": rendered_pages,
+            "equations": len(doc._element.findall(f".//{qn('m:oMath')}")),
+            "figures": len(doc._element.findall(f".//{qn('a:blip')}")),
+            "tables": len(doc.tables),
+        },
+        "issues": issues,
+        "passed": not issues,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="生成或校验数学建模 DOCX")
+    commands = parser.add_subparsers(dest="action", required=True)
+    validate = commands.add_parser("validate", help="执行 DOCX 完成门禁")
+    validate.add_argument("path", type=Path)
+    validate.add_argument("--contest", choices=sorted(CONTEST_PROFILES), default="cumcm")
+    validate.add_argument("--rendered-pages", type=int, required=True)
+    arguments = parser.parse_args()
+    result = validate_document(
+        arguments.path,
+        contest=arguments.contest,
+        rendered_pages=arguments.rendered_pages,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["passed"] else 1
+
+
 if __name__ == "__main__":
-    doc = new_document()
-    title(doc, "论文题目")
-    abstract_title(doc)
-    body(doc, "总体介绍")
-    keywords(doc, "优化；预测；评价")
-    heading1(doc, "一、问题重述")
-    heading2(doc, "1.1 问题背景")
-    heading3(doc, "问题一的建立")
-    three_line_table(doc, [["符号", "说明", "单位"], ["x", "变量", "-"]])
-    doc.save("paper_format_demo.docx")
+    raise SystemExit(main())

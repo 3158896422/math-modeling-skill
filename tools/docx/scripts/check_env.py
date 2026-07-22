@@ -5,6 +5,10 @@ import importlib.util
 import shutil
 import sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 
 REQUIRED_MODULES = ["docx", "lxml"]
 OPTIONAL_BINARIES = ["pandoc"]
@@ -22,7 +26,7 @@ def main() -> int:
     if optional:
         print("可选工具 OK: " + ", ".join(optional))
     else:
-        print("可选工具缺失: pandoc（仅 Markdown 整篇转 docx 时需要）")
+        print("可选工具缺失: pandoc（Markdown/LaTeX 整篇转 docx 时需要）")
     return 0
 
 

@@ -15,7 +15,7 @@
 |---|---|---|
 | 建模分析 | `roles/建模手/SKILL.md` | `题目分析报告.md`、`术语表格.md` |
 | 代码实现 | `roles/编程手/SKILL.md` | Python/MATLAB 代码、结果表格、三类图、复现清单 |
-| 论文撰写 | `roles/论文手/SKILL.md` | `完整论文.docx` |
+| 论文撰写 | `roles/论文手/SKILL.md` | 默认同时交付 `完整论文.docx`、LaTeX 源码项目与编译 PDF |
 
 ## 按任务加载
 
@@ -28,6 +28,7 @@
 | 可视化 | `roles/编程手/references/可视化规范.md` |
 | 论文结构 | `roles/论文手/references/章节模板.md` |
 | Word 格式 | `roles/论文手/references/论文格式规范.md` |
+| LaTeX 格式 | `roles/论文手/references/LaTeX格式规范.md` |
 
 ## 工具
 
@@ -37,5 +38,6 @@
 | PDF | `../tools/pdf/SKILL.md` |
 | Excel | `../tools/xlsx/SKILL.md` |
 | DOCX | `../tools/docx/SKILL.md` |
+| LaTeX | `../tools/latex/SKILL.md` |
 
 外部论文只在确有需要时搜索和读取，并保留来源。

@@ -32,7 +32,7 @@
 - 📊 **完整结果输出**：生成结果表格、原始数据图、模型运行过程图和最终结果图。
 - 🔁 **可复现运行**：记录随机种子、输入文件 SHA-256、运行时与依赖版本、关键参数和唯一复现命令。
 - 🔎 **双引擎论文搜索**：并行调用 OpenAlex 与 AnySearch，按 DOI 或题名交叉核验。
-- 📄 **Word 论文生成**：支持官方模板、Word 原生 OMML 公式、可编辑表格、篇幅与图文引用检查、结构校验和渲染抽检。
+- 📄 **Word / LaTeX 论文生成**：支持官方模板、整篇 LaTeX→DOCX、Word 原生 OMML 公式、完整 LaTeX 源码项目、真实 PDF 编译、篇幅与图文引用检查。
 - 🧩 **渐进式加载**：只读取当前阶段需要的角色规范、算法资料和工具说明。
 
 ## 🔄 三阶段工作流
@@ -45,7 +45,7 @@
 |:---:|---|---|---|
 | ① | [建模手](references/roles/建模手/SKILL.md) | 理解题目、设计模型、定义算法和验证方案 | `题目分析报告.md`、`术语表格.md` |
 | ② | [编程手](references/roles/编程手/SKILL.md) | 编写并运行 Python/MATLAB，生成结果与图 | 代码、结果表格、三类候选图、`results/复现清单.json` |
-| ③ | [论文手](references/roles/论文手/SKILL.md) | 基于真实结果构建论证并生成 Word 论文 | `完整论文.docx` |
+| ③ | [论文手](references/roles/论文手/SKILL.md) | 基于真实结果构建论证并生成 Word 与 LaTeX 论文 | 默认同时交付 `完整论文.docx`、LaTeX 源码项目与 PDF |
 
 ### 阶段反馈
 
@@ -82,7 +82,8 @@ npx skills add https://github.com/xiaomacoltai/math-modeling-skill --skill math-
 完整流程：
 
 ```text
-使用数学建模 Skill 完成这道题，从题目分析一直生成完整 Word 论文。
+使用数学建模 Skill 完成这道题，默认同时生成 Word 和 LaTeX/PDF 论文。
+使用官方 LaTeX 模板完成这道题，只交付完整 LaTeX 源码项目和编译 PDF。
 ```
 
 单阶段执行：
@@ -91,6 +92,7 @@ npx skills add https://github.com/xiaomacoltai/math-modeling-skill --skill math-
 只做建模分析，输出题目分析报告和术语表格。
 只实现现有模型，使用 MATLAB 运行并生成全部结果和图。
 根据现有代码结果生成完整论文.docx。
+根据现有代码结果和官方模板生成 LaTeX 论文并实际编译。
 ```
 
 主入口见 [SKILL.md](SKILL.md)。
@@ -116,7 +118,12 @@ PROJECT_ROOT/
 │   ├── raw_*.svg / raw_*.png
 │   ├── process_*.svg / *.png
 │   └── result_*.svg / *.png
-└── 完整论文.docx
+├── 完整论文.docx                 # 默认交付的 Word 论文
+├── 完整论文-LaTeX/               # 默认交付的 LaTeX 源码项目
+│   ├── main.tex
+│   ├── references.bib
+│   └── 官方模板附带的 cls/sty/bst 等资源
+└── 完整论文.pdf                  # 由 LaTeX 源码实际编译
 ```
 
 ## 🛠️ 集成工具
@@ -124,7 +131,8 @@ PROJECT_ROOT/
 | 工具 | 用途 |
 |---|---|
 | [双引擎论文搜索](tools/paper_search/SKILL.md) | OpenAlex + AnySearch 搜索、融合和交叉核验 |
-| [DOCX 工具](tools/docx/SKILL.md) | 官方模板、OMML 公式、三线表、修订、批注和校验 |
+| [DOCX 工具](tools/docx/SKILL.md) | 官方模板、整篇 LaTeX→DOCX、OMML 公式、三线表、修订、批注和校验 |
+| [LaTeX 工具](tools/latex/SKILL.md) | 官方模板项目复制、真实编译、引用检查和 PDF 质量校验 |
 | [Excel 工具](tools/xlsx/SKILL.md) | XLSX 模板处理、公式重算和错误检查 |
 | [PDF 工具](tools/pdf/SKILL.md) | 读取题目 PDF，提取文本、表格和图片 |
 
@@ -175,7 +183,9 @@ report = check_matlab_env(["data", "visualization", "optimization"]);
 
 ## 📄 论文生成
 
-推荐采用模板驱动方式：
+默认同时运行两个模板驱动分支，生成内容一致的 Word 与 LaTeX/PDF 论文；用户明确只要一种格式时只运行指定分支。当届官方提交要求仍决定实际可提交的版本。
+
+Word：
 
 ```text
 当届官方模板
@@ -186,6 +196,21 @@ report = check_matlab_env(["data", "visualization", "optimization"]);
 ```
 
 官方模板包含固定摘要页、编号页或占位符时，在原位置填充；只借用模板样式时，清除示例正文后再生成论文。
+
+已有完整 LaTeX 主稿时，可使用 Pandoc 将整篇 `.tex` 转为 DOCX，公式保留为原生 OMML，并通过 `--template` 套用官方 Word 参考模板。转换后仍须修正 Pandoc 警告并完成 DOCX 结构与渲染检查。
+
+LaTeX：
+
+```text
+当届官方 LaTeX 模板项目
+  → 完整复制 tex/cls/sty/bst/bib 与模板资源
+  → 填充正文、原生 LaTeX 公式、真实图表和已核验文献
+  → latexmk + 官方指定引擎真实编译
+  → 检查占位符、篇幅、图表引用、文献、日志和 PDF 实际页数
+  → 打开 PDF 进行版面抽检
+```
+
+没有官方 LaTeX 模板时才使用内置中英文构建基线。LaTeX 分支交付完整源码项目及其实际编译 PDF，不只交一个缺少模板依赖的 `.tex` 文件。两种格式必须使用相同的数据、图表、公式、参考文献和结论，并分别通过质量校验。
 
 CUMCM 默认以约 15000 字词单位、约 20 页作为完整度质量目标，但这不是官方最低要求。以 2026 年官方规范为例，摘要原则上不超过一页、正文不超过 30 页；实际交付必须重新核对目标届次的官方文件。校验器还会检查公式、图、表的基本数量，图表题注与正文引用，以及参考文献和正文引用是否双向对应。
 
@@ -238,7 +263,7 @@ math-modeling-skill/
 │       ├── 建模手/
 │       ├── 编程手/
 │       └── 论文手/
-├── tools/                          # DOCX、PDF、XLSX、论文搜索
+├── tools/                          # DOCX、LaTeX、PDF、XLSX、论文搜索
 └── tests/                          # 回归测试
 ```
 
@@ -250,7 +275,7 @@ python tools/docx/scripts/self_check.py
 python -m compileall -q tools references/roles/编程手/scripts
 ```
 
-回归测试覆盖双引擎搜索、公式转换、DOCX、Excel 重算、论文结构、动态依赖和复现清单。
+回归测试覆盖双引擎搜索、公式转换、DOCX、LaTeX 模板与校验、Excel 重算、论文结构、动态依赖和复现清单。
 
 ## 📋 版本与更新日志
 
@@ -270,7 +295,7 @@ python -m compileall -q tools references/roles/编程手/scripts
 
 <div align="center">
 
-[![Star History Chart](https://api.star-history.com/svg?repos=XiaoMaColtAI/math-modeling-skill&type=Date)](https://star-history.com/#XiaoMaColtAI/math-modeling-skill&Date)
+[![GitHub Star 历史](imgs/star-history.svg)](https://github.com/XiaoMaColtAI/math-modeling-skill/stargazers)
 
 </div>
 
