@@ -27,6 +27,7 @@
 | MATLAB 工具箱与出图 | `roles/编程手/references/MATLAB规范.md` |
 | 可视化 | `roles/编程手/references/可视化规范.md` |
 | 图型选择与科研绘图避坑 | `roles/编程手/references/图表选择与避坑.md` |
+| Subagent 调度与阶段质检 | `Subagent调度.md` |
 | 论文结构 | `roles/论文手/references/章节模板.md` |
 | Word 格式 | `roles/论文手/references/论文格式规范.md` |
 | LaTeX 格式 | `roles/论文手/references/LaTeX格式规范.md` |

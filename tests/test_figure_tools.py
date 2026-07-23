@@ -86,6 +86,114 @@ class PlotStyleTests(unittest.TestCase):
 
         self.assertTrue(any("x 刻度标签重叠" in issue for issue in issues), issues)
 
+    @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "需要 matplotlib")
+    def test_publication_subplots_preserves_declared_panel_hierarchy(self):
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+
+        fig, axes = plot_style.publication_subplots(
+            1, 2, width="double", aspect=0.5, width_ratios=[1.8, 1]
+        )
+        ratios = axes[0].get_subplotspec().get_gridspec().get_width_ratios()
+        plt.close(fig)
+
+        self.assertEqual(ratios, [1.8, 1])
+        self.assertEqual(tuple(fig.get_size_inches()), (7.2, 3.6))
+
+    @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "需要 matplotlib")
+    def test_design_audit_rejects_dense_markers_and_nonzero_bar_baseline(self):
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+
+        fig, axes = plt.subplots(1, 2)
+        axes[0].plot(range(30), range(30), marker="o")
+        axes[1].bar(["A", "B"], [10, 12])
+        axes[1].set_ylim(8, 14)
+        issues = plot_style.audit_design(fig)
+        plt.close(fig)
+
+        messages = "\n".join(issues)
+        self.assertIn("逐点绘制标记", messages)
+        self.assertIn("柱状图未从零开始", messages)
+
+    @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "需要 matplotlib")
+    def test_design_audit_reads_left_title_negative_bars_and_figure_legend(self):
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+
+        plot_style.apply_publication_style(language="en", width="single")
+        fig, axes = plt.subplots(1, 2)
+        axes[0].set_title("This panel title is deliberately much too long", loc="left")
+        axes[0].bar(["A", "B"], [-10, -12])
+        axes[0].set_ylim(-14, -8)
+        for index in range(6):
+            axes[1].plot([0, 1], [index, index + 1], label=f"series-{index}")
+        handles, labels = axes[1].get_legend_handles_labels()
+        fig.legend(handles, labels)
+        issues = plot_style.audit_design(fig)
+        plt.close(fig)
+
+        messages = "\n".join(issues)
+        self.assertIn("标题过长", messages)
+        self.assertIn("柱状图未从零开始", messages)
+        self.assertIn("整图共享图例超过 5 项", messages)
+
+    @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "需要 matplotlib")
+    def test_design_audit_rejects_redundant_colorbar_for_annotated_2x2_matrix(self):
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        fig, axis = plt.subplots()
+        image = axis.imshow(np.array([[12, 3], [2, 9]]))
+        for row in range(2):
+            for column in range(2):
+                axis.text(column, row, "1")
+        fig.colorbar(image, ax=axis)
+        issues = plot_style.audit_design(fig)
+        plt.close(fig)
+
+        self.assertTrue(any("冗余 colorbar" in issue for issue in issues), issues)
+
+    @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "需要 matplotlib")
+    def test_design_audit_associates_colorbar_with_its_own_image(self):
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        fig, axes = plt.subplots(1, 2)
+        axes[0].imshow(np.array([[12, 3], [2, 9]]))
+        for row in range(2):
+            for column in range(2):
+                axes[0].text(column, row, "1")
+        continuous = axes[1].imshow(np.arange(100).reshape(10, 10))
+        fig.colorbar(continuous, ax=axes[1])
+        issues = plot_style.audit_design(fig)
+        plt.close(fig)
+
+        self.assertFalse(any("冗余 colorbar" in issue for issue in issues), issues)
+
+    def test_matlab_export_uses_design_audit(self):
+        audit = (SCRIPTS / "audit_publication_figure.m").read_text(encoding="utf-8")
+        exporter = (SCRIPTS / "export_publication_figure.m").read_text(encoding="utf-8")
+
+        self.assertIn("MarkerIndices", audit)
+        self.assertIn("柱状图未从零开始", audit)
+        self.assertIn("limits(2) < -tolerance", audit)
+        self.assertIn('isprop(ax, "Colorbar")', audit)
+        self.assertIn("TightInset", audit)
+        self.assertIn("audit_publication_figure(fig)", exporter)
+
 
 class FigureAuditTests(unittest.TestCase):
     def test_accepts_three_categories_with_svg_png_pairs(self):

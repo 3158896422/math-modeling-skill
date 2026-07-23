@@ -7,6 +7,7 @@ import warnings
 import logging
 from pathlib import Path
 from typing import Iterable, Sequence
+import unicodedata
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[4]
@@ -87,7 +88,7 @@ def figure_size(width: str = "report", aspect: float = 0.62) -> tuple[float, flo
 
 
 def apply_publication_style(language: str = "zh", width: str = "report") -> dict:
-    """应用适合数学建模论文的克制型出版样式。"""
+    """应用适合数学建模论文的克制型 Nature/SCI 出版样式基线。"""
 
     import matplotlib as mpl
     from cycler import cycler
@@ -101,19 +102,30 @@ def apply_publication_style(language: str = "zh", width: str = "report") -> dict
         "axes.facecolor": "white",
         "font.family": "sans-serif",
         "font.sans-serif": [font_name, "Arial", "Helvetica", "DejaVu Sans"],
-        "font.size": 8.0,
-        "axes.titlesize": 9.0,
-        "axes.labelsize": 8.5,
-        "xtick.labelsize": 7.5,
-        "ytick.labelsize": 7.5,
-        "legend.fontsize": 7.5,
-        "axes.linewidth": 0.8,
-        "lines.linewidth": 1.4,
-        "lines.markersize": 4.5,
+        "font.size": 7.5,
+        "axes.titlesize": 8.0,
+        "axes.titleweight": "normal",
+        "axes.titlelocation": "left",
+        "axes.titlepad": 4.0,
+        "axes.labelsize": 8.0,
+        "xtick.labelsize": 7.0,
+        "ytick.labelsize": 7.0,
+        "legend.fontsize": 7.0,
+        "axes.linewidth": 0.7,
+        "lines.linewidth": 1.1,
+        "lines.markersize": 3.5,
+        "patch.linewidth": 0.6,
+        "hatch.linewidth": 0.4,
+        "xtick.major.size": 3.0,
+        "ytick.major.size": 3.0,
+        "xtick.major.width": 0.6,
+        "ytick.major.width": 0.6,
         "axes.spines.top": False,
         "axes.spines.right": False,
         "axes.grid": False,
         "legend.frameon": False,
+        "legend.handlelength": 1.6,
+        "legend.borderaxespad": 0.4,
         "axes.unicode_minus": False,
         "axes.prop_cycle": cycler(color=COLOR_SEQUENCE),
         "svg.fonttype": "none",
@@ -124,14 +136,49 @@ def apply_publication_style(language: str = "zh", width: str = "report") -> dict
     return {"font": font_name, "size_inches": size, "colors": COLOR_SEQUENCE}
 
 
+def publication_subplots(
+    nrows: int = 1,
+    ncols: int = 1,
+    *,
+    width: str = "report",
+    aspect: float = 0.62,
+    width_ratios: Sequence[float] | None = None,
+    height_ratios: Sequence[float] | None = None,
+    squeeze: bool = True,
+):
+    """按最终尺寸创建子图，并允许显式声明主次面板比例。"""
+
+    import matplotlib.pyplot as plt
+
+    if nrows < 1 or ncols < 1:
+        raise ValueError("nrows 和 ncols 必须大于 0")
+    if width_ratios is not None and len(width_ratios) != ncols:
+        raise ValueError("width_ratios 数量必须与 ncols 一致")
+    if height_ratios is not None and len(height_ratios) != nrows:
+        raise ValueError("height_ratios 数量必须与 nrows 一致")
+    gridspec_kw = {}
+    if width_ratios is not None:
+        gridspec_kw["width_ratios"] = list(width_ratios)
+    if height_ratios is not None:
+        gridspec_kw["height_ratios"] = list(height_ratios)
+    return plt.subplots(
+        nrows,
+        ncols,
+        figsize=figure_size(width, aspect),
+        layout="constrained",
+        gridspec_kw=gridspec_kw or None,
+        squeeze=squeeze,
+    )
+
+
 def add_panel_labels(
     axes: Iterable,
     labels: Sequence[str] | None = None,
     *,
-    x_offset_pt: float = -16.0,
-    y_offset_pt: float = 2.0,
+    x_offset_pt: float = -8.0,
+    y_offset_pt: float = 1.0,
 ) -> None:
-    """以固定物理偏移为多面板图添加统一标签。"""
+    """在各面板左上外侧添加小写粗体编号。"""
 
     axes_list = list(axes)
     panel_labels = list(labels) if labels is not None else [chr(97 + i) for i in range(len(axes_list))]
@@ -146,7 +193,7 @@ def add_panel_labels(
             textcoords="offset points",
             ha="right",
             va="bottom",
-            fontsize=9,
+            fontsize=8,
             fontweight="bold",
             annotation_clip=False,
         )
@@ -220,6 +267,95 @@ def audit_layout(fig) -> list[str]:
     return issues
 
 
+def _display_width(text: str) -> int:
+    return sum(
+        2 if unicodedata.east_asian_width(character) in {"W", "F"} else 1
+        for character in text
+    )
+
+
+def _is_colorbar_axis(axis) -> bool:
+    return axis.get_label() == "<colorbar>" or hasattr(axis, "_colorbar")
+
+
+def audit_design(fig) -> list[str]:
+    """检查可由对象结构确定的高风险设计，避免“文件合格、图却不好看”。"""
+
+    from matplotlib.container import BarContainer
+
+    issues: list[str] = []
+    data_axes = [axis for axis in fig.axes if not _is_colorbar_axis(axis)]
+    colorbar_axes = [axis for axis in fig.axes if _is_colorbar_axis(axis)]
+    colorbar_mappables = {
+        id(axis._colorbar.mappable)
+        for axis in colorbar_axes
+        if hasattr(axis, "_colorbar") and getattr(axis._colorbar, "mappable", None) is not None
+    }
+    for index, axis in enumerate(data_axes, start=1):
+        for location in ("left", "center", "right"):
+            title = axis.get_title(loc=location).strip()
+            title_lines = title.splitlines()
+            if title and (
+                len(title_lines) > 1
+                or max(_display_width(line) for line in title_lines) > 28
+            ):
+                issues.append(
+                    f"第 {index} 个坐标轴标题过长；完整论述应移到图注，面板内只保留短标题"
+                )
+                break
+
+        legend = axis.get_legend()
+        if legend is not None and len(legend.get_texts()) > 5:
+            issues.append(
+                f"第 {index} 个坐标轴图例超过 5 项；应直接标注、改为共享图例或拆分证据"
+            )
+
+        for line in axis.lines:
+            marker = line.get_marker()
+            if marker in {None, "", " ", "None", "none"}:
+                continue
+            point_count = len(line.get_xdata(orig=False))
+            if point_count > 25 and line.get_markevery() is None:
+                issues.append(
+                    f"第 {index} 个坐标轴对 {point_count} 个点逐点绘制标记；"
+                    "应取消标记或设置 markevery"
+                )
+                break
+
+        for container in axis.containers:
+            if not isinstance(container, BarContainer) or not container.patches:
+                continue
+            if container.orientation == "vertical":
+                lower, upper = axis.get_ylim()
+            else:
+                lower, upper = axis.get_xlim()
+            tolerance = max(abs(upper - lower), 1.0) * 1e-9
+            if lower > tolerance or upper < -tolerance:
+                issues.append(
+                    f"第 {index} 个坐标轴的柱状图未从零开始；"
+                    "若必须截断，应改用点图/区间图并显式说明"
+                )
+                break
+
+        for image in axis.images:
+            values = image.get_array()
+            if (
+                getattr(values, "size", 0) <= 4
+                and len(axis.texts) >= getattr(values, "size", 0)
+                and id(image) in colorbar_mappables
+            ):
+                issues.append(
+                    f"第 {index} 个坐标轴是已标数值的 2×2 小矩阵，"
+                    "不应再使用冗余 colorbar"
+                )
+                break
+    for legend in fig.legends:
+        if len(legend.get_texts()) > 5:
+            issues.append("整图共享图例超过 5 项；应直接标注、拆分证据或突出核心系列")
+            break
+    return issues
+
+
 def resolve_output_stem(output_stem: str | Path) -> Path:
     """解析导出路径，并禁止把任务产物写回 Skill 目录。"""
 
@@ -258,14 +394,18 @@ def export_figure(
     dpi: int = 300,
     grayscale_preview: bool = True,
     strict_layout: bool = True,
+    strict_design: bool = True,
 ) -> dict[str, str]:
-    """按固定物理尺寸导出 SVG、PNG 和可选灰度质检图。"""
+    """按固定物理尺寸导出，并执行布局与高风险设计门禁。"""
 
     if dpi < 300:
         raise ValueError("论文图 PNG 的 dpi 不能低于 300")
     layout_issues = audit_layout(fig)
     if strict_layout and layout_issues:
         raise ValueError("版面预检未通过：" + "；".join(layout_issues))
+    design_issues = audit_design(fig)
+    if strict_design and design_issues:
+        raise ValueError("出版设计预检未通过：" + "；".join(design_issues))
     stem = resolve_output_stem(output_stem)
     stem.parent.mkdir(parents=True, exist_ok=True)
     svg_path = stem.with_suffix(".svg")
@@ -285,9 +425,11 @@ __all__ = [
     "WIDTHS_IN",
     "add_panel_labels",
     "apply_publication_style",
+    "audit_design",
     "audit_layout",
     "choose_font",
     "export_figure",
     "figure_size",
+    "publication_subplots",
     "resolve_output_stem",
 ]

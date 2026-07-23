@@ -1,10 +1,11 @@
-function outputs = export_publication_figure(fig, outputStem, dpi, grayscalePreview)
-%EXPORT_PUBLICATION_FIGURE 输出 SVG、PNG 与可选灰度质检图。
+function outputs = export_publication_figure(fig, outputStem, dpi, grayscalePreview, strictDesign)
+%EXPORT_PUBLICATION_FIGURE 通过设计门禁后输出 SVG、PNG 与灰度质检图。
 arguments
     fig (1,1) matlab.ui.Figure
     outputStem (1,1) string
     dpi (1,1) double {mustBeInteger,mustBeGreaterThanOrEqual(dpi,300)} = 300
     grayscalePreview (1,1) logical = true
+    strictDesign (1,1) logical = true
 end
 
 [folder, name, ~] = fileparts(outputStem);
@@ -19,6 +20,10 @@ svgPath = stem + ".svg";
 pngPath = stem + ".png";
 fig.PaperPositionMode = "auto";
 drawnow;
+designIssues = audit_publication_figure(fig);
+if strictDesign && ~isempty(designIssues)
+    error("出版设计预检未通过：%s", join(designIssues, "；"));
+end
 exportgraphics(fig, svgPath, "ContentType", "vector");
 exportgraphics(fig, pngPath, "Resolution", dpi);
 outputs = struct("svg", svgPath, "png", pngPath);

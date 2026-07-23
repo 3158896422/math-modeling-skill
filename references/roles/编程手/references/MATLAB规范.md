@@ -60,10 +60,13 @@ python ../scripts/repro_manifest.py `
 
 ## 出版级绘图
 
-将 `ROLE_ROOT/scripts/apply_publication_style.m` 与 `export_publication_figure.m` 复制到 `PROJECT_ROOT/utils/`，再由项目代码 `addpath` 调用。绘图前同样完成数据剖析与图表契约，不能把 MATLAB 作为低配可视化分支。
+将 `ROLE_ROOT/scripts/apply_publication_style.m`、`audit_publication_figure.m` 与 `export_publication_figure.m` 复制到 `PROJECT_ROOT/utils/`，再由项目代码 `addpath` 调用。绘图前同样完成数据剖析、单图核心结论、主次面板与图表契约，不能把 MATLAB 作为低配可视化分支。
 
 - `apply_publication_style(fig, "zh", "report")` 统一字体、色觉友好配色、线宽、最终尺寸和无网格线基线。
-- `export_publication_figure(fig, outputStem, 300)` 同时输出 SVG 与 300 DPI PNG。
+- `audit_publication_figure(fig)` 检查标题/标签/刻度是否可能超出画布，以及长标题、超量图例、稠密逐点标记、非零基线柱状图和对应小矩阵的冗余 colorbar。
+- `export_publication_figure(fig, outputStem, 300)` 默认先执行设计门禁，再同时输出 SVG 与 300 DPI PNG。
 - 官方模板规定的尺寸、字体和格式优先；覆盖内置值时记录实际参数。
-- 导出后运行 Python 标准库审计器 `figure_audit.py`，并实际打开 PNG 检查缺字、裁切、遮挡、尺度和多面板一致性。
+- 导出后运行 Python 标准库审计器 `figure_audit.py`，并实际打开 PNG 检查自动门禁无法可靠判断的缺字、刻度重叠、遮挡、尺度和多面板一致性。
+- 主结论和辅助证据的信息量不同时，使用非对称 `tiledlayout` 跨格布局，不机械创建等宽双子图。
+- 除非官方模板有明确冲突且已记录理由，不得把 `strictDesign` 设为 `false` 绕过设计门禁。
 - MATLAB 不得调用 `grid on`；确有数值意义的参考线使用 `xline`/`yline` 并在图注说明。
