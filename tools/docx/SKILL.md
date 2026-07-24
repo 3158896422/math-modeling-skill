@@ -74,10 +74,31 @@ python scripts/equations.py generate "论文.md" `
 python scripts/equations.py convert-latex `
   "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" `
   --output "<PROJECT_ROOT>/完整论文.docx" `
-  --template "<PROJECT_ROOT>/当届官方模板.docx"
+  --template "<PROJECT_ROOT>/当届官方模板.docx" `
+  --timeout 120
 ```
 
-默认拒绝覆盖已有输出。Pandoc 警告必须逐项检查；自定义宏、LaTeX 专用环境、浮动体位置、交叉引用和参考文献样式可能需要在 Word 中修正。未提供 CSL 时 citeproc 使用 Pandoc 默认引文样式，因此竞赛要求特定引文格式时仍须在 Word 中核对。转换完成后必须执行 DOCX 结构校验和渲染抽检，不能把“成功生成文件”等同于版式合格。
+工具会在转换前递归展开项目内的 `\input` 与 `\include`，但保留注释和字面量环境中的原文，拒绝越界路径和循环包含；转换成功后生成同名 `.conversion.json`，记录全部输入文件、输入/输出/模板哈希、Pandoc 路径与版本、命令、耗时和警告。DOCX 与清单成对替换，失败时恢复旧版本。默认拒绝覆盖已有输出；确认替换旧版本时才使用 `--overwrite`。
+
+Pandoc 向标准错误输出的任何警告都会默认阻断发布，失败时不会留下 DOCX。只有逐项检查后，才能用精确正则和具体理由覆盖：
+
+```powershell
+python scripts/equations.py convert-latex `
+  "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" `
+  --output "<PROJECT_ROOT>/完整论文.docx" `
+  --template "<PROJECT_ROOT>/当届官方模板.docx" `
+  --allow-warning "<已核对的精确警告正则>" `
+  --override-reason "<不影响交付的证据>"
+```
+
+自定义宏、LaTeX 专用环境、浮动体位置、交叉引用和参考文献样式可能需要在 Word 中修正。未提供 CSL 时 citeproc 使用 Pandoc 默认引文样式，因此竞赛要求特定引文格式时仍须在 Word 中核对。转换完成后必须执行 DOCX 结构校验、清单核对和渲染抽检，不能把“成功生成文件”等同于版式合格。
+
+转换后以及交付前都要重新验证清单；源码、任一子文件、图片、BibTeX、参考模板、DOCX 或清单发生变化后必须重新转换：
+
+```powershell
+python scripts/equations.py verify-conversion `
+  "<PROJECT_ROOT>/完整论文.docx"
+```
 
 ## 解包、校验与重打包
 
@@ -115,6 +136,7 @@ python scripts/check_env.py
 python scripts/self_check.py
 python scripts/office/validate.py "<PROJECT_ROOT>/完整论文.docx"
 python scripts/paper_format.py validate "<PROJECT_ROOT>/完整论文.docx" --contest cumcm --rendered-pages <DOCX实际渲染页数>
+python scripts/equations.py verify-conversion "<PROJECT_ROOT>/完整论文.docx"
 ```
 
-`paper_format.py validate` 输出结构化指标，并在官方前置结构、篇幅质量目标、公式/图/表数量、图表编号与正文引用、参考文献双向对应或实际页数任一不满足时返回非零退出码。所有竞赛默认至少 8 幅图；CUMCM 默认的 15000 字词单位和约 20 页只是质量目标。以 2026 年官方规范为例，正文不超过 30 页才是硬约束。只有当届官方规则或用户明确要求允许偏离时才能调整目标并记录依据。结构校验后，把 DOCX 渲染成 PDF 或图片抽检分页、公式、表格、图片、页眉页脚和字体替换。
+`verify-conversion` 仅适用于由本工具的 Pandoc 转换生成、带 `.conversion.json` 的 DOCX；直接由 `paper_format.py` 构建时省略。`paper_format.py validate` 输出结构化指标，并在官方前置结构、篇幅质量目标、公式/图/表数量、图表编号与正文引用、参考文献双向对应或实际页数任一不满足时返回非零退出码。所有竞赛默认至少 8 幅图；CUMCM 默认的 15000 字词单位和约 20 页只是质量目标。以 2026 年官方规范为例，正文不超过 30 页才是硬约束。只有当届官方规则或用户明确要求允许偏离时才能调整目标并记录依据。结构校验后，把 DOCX 渲染成 PDF 或图片抽检分页、公式、表格、图片、页眉页脚和字体替换。

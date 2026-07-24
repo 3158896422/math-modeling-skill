@@ -28,20 +28,25 @@ LaTeX 方程 → Word OMML 公式转换工具
 
 import argparse
 import copy
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 SKILL_ROOT = Path(__file__).resolve().parents[3]
 
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 try:
     from docx import Document
@@ -667,7 +672,240 @@ def batch_replace(doc_path: str, mapping: dict, output_path: str):
 # 使用 Pandoc 生成 docx
 # ---------------------------------------------------------------------------
 
-def _pandoc_to_docx(source_path, output_path, source_format, template_path=None):
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _conversion_manifest_path(output: Path) -> Path:
+    return output.with_suffix(".conversion.json")
+
+
+def _replace_conversion_pair(
+    source: Path,
+    target: Path,
+    manifest_payload: dict,
+    *,
+    overwrite: bool,
+) -> Path:
+    manifest = _conversion_manifest_path(target)
+    if not overwrite and (target.exists() or manifest.exists()):
+        raise FileExistsError(f"输出已存在，拒绝覆盖：{target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    token = uuid.uuid4().hex
+    staged_target = target.parent / f".{target.name}.new-{token}"
+    staged_manifest = target.parent / f".{manifest.name}.new-{token}"
+    backups = {
+        target: target.parent / f".{target.name}.bak-{token}",
+        manifest: target.parent / f".{manifest.name}.bak-{token}",
+    }
+    moved = set()
+    installed = set()
+    try:
+        shutil.copyfile(source, staged_target)
+        staged_manifest.write_text(
+            json.dumps(manifest_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        for current, backup in backups.items():
+            if current.exists():
+                os.replace(current, backup)
+                moved.add(current)
+        os.replace(staged_target, target)
+        installed.add(target)
+        os.replace(staged_manifest, manifest)
+        installed.add(manifest)
+    except Exception:
+        for current in installed:
+            if current.exists():
+                current.unlink()
+        for current in moved:
+            backup = backups[current]
+            if backup.exists():
+                os.replace(backup, current)
+        raise
+    finally:
+        for path in (staged_target, staged_manifest, *backups.values()):
+            if path.exists():
+                path.unlink()
+    return manifest
+
+
+def _latex_root(source: Path) -> Path:
+    for root in (source.parent, *source.parents):
+        manifest_path = root / "latex-project.json"
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            configured = (root / manifest["main_tex"]).resolve()
+        except (KeyError, OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"LaTeX 项目清单无效：{error}") from error
+        if configured != source:
+            raise ValueError("转换入口与 latex-project.json 记录不一致")
+        return root
+    return source.parent
+
+
+LITERAL_RE = re.compile(
+    r"\\begin\s*\{(?P<env>verbatim\*?|lstlisting|minted|comment)\}.*?"
+    r"\\end\s*\{(?P=env)\}|"
+    r"\\verb\*?(?P<delimiter>[^\w\s]).*?(?P=delimiter)",
+    re.S,
+)
+INPUT_RE = re.compile(
+    r"\\(input|include)(?![A-Za-z@])\s*(?:\{([^}]+)\}|([^\s%]+))"
+)
+
+
+def _replace_visible_inputs(text: str, expand) -> str:
+    def visible(segment: str) -> str:
+        lines = []
+        for line in segment.splitlines(keepends=True):
+            comment_at = None
+            for index, character in enumerate(line):
+                if character != "%":
+                    continue
+                backslashes = 0
+                cursor = index - 1
+                while cursor >= 0 and line[cursor] == "\\":
+                    backslashes += 1
+                    cursor -= 1
+                if backslashes % 2 == 0:
+                    comment_at = index
+                    break
+            if comment_at is None:
+                lines.append(INPUT_RE.sub(expand, line))
+            else:
+                lines.append(
+                    INPUT_RE.sub(expand, line[:comment_at]) + line[comment_at:]
+                )
+        return "".join(lines)
+
+    result = []
+    cursor = 0
+    for match in LITERAL_RE.finditer(text):
+        result.append(visible(text[cursor:match.start()]))
+        result.append(match.group(0))
+        cursor = match.end()
+    result.append(visible(text[cursor:]))
+    return "".join(result)
+
+
+def _expand_latex_inputs(source: Path) -> tuple[str, Path, list[Path]]:
+    root = _latex_root(source)
+    seen = set()
+    stack = set()
+    files = []
+
+    def load(path: Path) -> str:
+        current = path.resolve()
+        if current != root and root not in current.parents:
+            raise ValueError(f"LaTeX 子文件超出项目目录：{path}")
+        if current in stack:
+            raise ValueError(f"LaTeX 子文件循环包含：{current.relative_to(root)}")
+        if not current.is_file():
+            raise FileNotFoundError(
+                f"LaTeX 子文件不存在：{current.relative_to(root)}"
+            )
+        if current not in seen:
+            seen.add(current)
+            files.append(current)
+        stack.add(current)
+        text = current.read_text(encoding="utf-8")
+
+        def expand(match):
+            raw = Path((match.group(2) or match.group(3)).strip())
+            if not raw.suffix:
+                raw = raw.with_suffix(".tex")
+            content = load(root / raw)
+            return f"\n\\clearpage\n{content}\n" if match.group(1) == "include" else content
+
+        expanded = _replace_visible_inputs(text, expand)
+        stack.remove(current)
+        return expanded
+
+    return load(source), root, files
+
+
+def _source_bundle_sha256(files: list[Path], root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(files):
+        relative = path.relative_to(root).as_posix()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _project_bundle(root: Path, excluded: set[Path]) -> tuple[str, list[Path]]:
+    generated_suffixes = {
+        ".aux", ".log", ".out", ".toc", ".bbl", ".blg", ".bcf", ".fls",
+        ".fdb_latexmk", ".synctex.gz", ".run.xml", ".xdv", ".dvi",
+    }
+    files = []
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        if path.resolve() in excluded or path.relative_to(root).parts[0] == "build":
+            continue
+        suffix = path.suffix.casefold()
+        compound = "".join(path.suffixes[-2:]).casefold()
+        if suffix in generated_suffixes or compound in generated_suffixes:
+            continue
+        if path.name.endswith((".build.json", ".conversion.json")):
+            continue
+        files.append(path)
+    return _source_bundle_sha256(files, root), files
+
+
+def _tool_version(executable: str) -> str | None:
+    try:
+        process = subprocess.Popen(
+            [executable, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        output, _ = process.communicate(timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        if "process" in locals():
+            process.kill()
+        return None
+    return output.splitlines()[0].strip() if process.returncode == 0 and output else None
+
+
+def _gate_warnings(warnings, allow_warnings, override_reason):
+    patterns = list(allow_warnings or [])
+    if patterns and (not override_reason or not override_reason.strip()):
+        raise ValueError("允许 Pandoc 警告必须提供 override_reason")
+    try:
+        compiled = [re.compile(pattern, re.I) for pattern in patterns]
+    except re.error as error:
+        raise ValueError(f"无效的警告允许正则：{error}") from error
+    allowed, blocked = [], []
+    for warning in warnings:
+        (allowed if any(pattern.search(warning) for pattern in compiled) else blocked).append(
+            warning
+        )
+    return allowed, blocked
+
+
+def _pandoc_to_docx(
+    source_path,
+    output_path,
+    source_format,
+    template_path=None,
+    *,
+    timeout=120,
+    allow_warnings=None,
+    override_reason=None,
+    overwrite=False,
+):
     source = Path(source_path).resolve()
     output = Path(output_path).resolve()
     expected_suffix = ".tex" if source_format == "latex" else ".md"
@@ -677,7 +915,10 @@ def _pandoc_to_docx(source_path, output_path, source_format, template_path=None)
         raise ValueError("输出文件必须使用 .docx 扩展名")
     if output == SKILL_ROOT or SKILL_ROOT in output.parents:
         raise ValueError("拒绝向 SKILL_ROOT 写入 DOCX")
-    if output.exists():
+    if timeout <= 0:
+        raise ValueError("timeout 必须为正整数")
+    manifest_path = _conversion_manifest_path(output)
+    if not overwrite and (output.exists() or manifest_path.exists()):
         raise FileExistsError(f"输出已存在，拒绝覆盖：{output}")
 
     template = Path(template_path).resolve() if template_path else None
@@ -690,6 +931,30 @@ def _pandoc_to_docx(source_path, output_path, source_format, template_path=None)
         raise RuntimeError("未找到 pandoc，无法转换为 DOCX")
 
     output.parent.mkdir(parents=True, exist_ok=True)
+    flattened = None
+    source_for_pandoc = source
+    if source_format == "latex":
+        expanded, resource_root, source_files = _expand_latex_inputs(source)
+        project_hash, project_files = _project_bundle(
+            resource_root, {output, manifest_path}
+        )
+        with tempfile.NamedTemporaryFile(
+            "w",
+            dir=output.parent,
+            suffix=".tex",
+            delete=False,
+            encoding="utf-8",
+        ) as handle:
+            handle.write(expanded)
+            flattened = Path(handle.name)
+        source_for_pandoc = flattened
+        source_hash = _source_bundle_sha256(source_files, resource_root)
+    else:
+        resource_root = source.parent
+        source_files = [source]
+        source_hash = _sha256(source)
+        project_hash = source_hash
+        project_files = source_files
     with tempfile.NamedTemporaryFile(
         dir=output.parent, suffix=".docx", delete=False
     ) as handle:
@@ -702,23 +967,43 @@ def _pandoc_to_docx(source_path, output_path, source_format, template_path=None)
         "docx",
         "--standalone",
         "--citeproc",
-        str(source),
+        str(source_for_pandoc),
         "--output",
         str(temporary),
-        f"--resource-path={source.parent}",
+        f"--resource-path={resource_root}",
     ]
     if template is not None:
         command.extend(["--reference-doc", str(template)])
+    reproduce = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "convert-latex" if source_format == "latex" else "generate",
+        str(source),
+        "--output",
+        str(output),
+    ]
+    if template is not None:
+        reproduce.extend(["--template", str(template)])
+    reproduce.extend(["--timeout", str(timeout)])
+    for pattern in allow_warnings or []:
+        reproduce.extend(["--allow-warning", pattern])
+    if override_reason:
+        reproduce.extend(["--override-reason", override_reason.strip()])
+    if overwrite:
+        reproduce.append("--overwrite")
     warnings = []
+    allowed_warnings = []
+    started = time.monotonic()
     try:
         completed = subprocess.run(
             command,
-            cwd=source.parent,
+            cwd=resource_root,
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             errors="replace",
-            timeout=120,
+            timeout=timeout,
         )
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout).strip()[-2000:]
@@ -726,24 +1011,306 @@ def _pandoc_to_docx(source_path, output_path, source_format, template_path=None)
         warnings = [
             line.strip() for line in completed.stderr.splitlines() if line.strip()
         ]
+        allowed_warnings, blocked_warnings = _gate_warnings(
+            warnings, allow_warnings, override_reason
+        )
+        if blocked_warnings:
+            raise RuntimeError(
+                "Pandoc 存在未获批准的警告，拒绝发布 DOCX："
+                + "；".join(blocked_warnings)
+            )
         Document(temporary)
-        temporary.replace(output)
+        manifest = {
+            "schema_version": 1,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "source_format": source_format,
+            "source": str(source),
+            "source_files": [
+                path.relative_to(resource_root).as_posix() for path in source_files
+            ],
+            "source_sha256": source_hash,
+            "project_files": [
+                path.relative_to(resource_root).as_posix() for path in project_files
+            ],
+            "project_sha256": project_hash,
+            "output": str(output),
+            "output_sha256": _sha256(temporary),
+            "template": str(template) if template else None,
+            "template_sha256": _sha256(template) if template else None,
+            "pandoc": {
+                "path": executable,
+                "version": _tool_version(executable),
+            },
+            "command": command,
+            "returncode": completed.returncode,
+            "duration_seconds": round(time.monotonic() - started, 3),
+            "warnings": warnings,
+            "allowed_warnings": allowed_warnings,
+            "warning_override": {
+                "patterns": list(allow_warnings or []),
+                "reason": override_reason.strip() if override_reason else None,
+            },
+            "reproduce": subprocess.list2cmdline(reproduce),
+        }
+        manifest_path = _replace_conversion_pair(
+            temporary, output, manifest, overwrite=overwrite
+        )
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError("Pandoc 转换超时") from error
+        raise RuntimeError(f"Pandoc 转换超过 {timeout} 秒") from error
     finally:
         if temporary.exists():
             temporary.unlink()
-    return {"output_path": str(output), "warnings": warnings}
+        if flattened is not None and flattened.exists():
+            flattened.unlink()
+    return {
+        "output_path": str(output),
+        "manifest": str(manifest_path),
+        "warnings": warnings,
+        "allowed_warnings": allowed_warnings,
+    }
 
 
-def markdown_to_docx(md_path: str, output_path: str, template_path: str = None):
+def markdown_to_docx(
+    md_path: str,
+    output_path: str,
+    template_path: str = None,
+    **options,
+):
     """将含 LaTeX 公式的 Markdown 转换为 DOCX。"""
-    return _pandoc_to_docx(md_path, output_path, "markdown", template_path)
+    return _pandoc_to_docx(
+        md_path, output_path, "markdown", template_path, **options
+    )
 
 
-def latex_to_docx(tex_path: str, output_path: str, template_path: str = None):
+def latex_to_docx(
+    tex_path: str,
+    output_path: str,
+    template_path: str = None,
+    **options,
+):
     """将完整 LaTeX 文档转换为 DOCX，公式由 Pandoc 写为原生 OMML。"""
-    return _pandoc_to_docx(tex_path, output_path, "latex", template_path)
+    return _pandoc_to_docx(
+        tex_path, output_path, "latex", template_path, **options
+    )
+
+
+def verify_conversion(output_path, manifest_path=None):
+    """重新计算输入、模板和 DOCX 哈希，验证转换交付物仍与清单一致。"""
+    output = Path(output_path).resolve()
+    manifest_file = (
+        Path(manifest_path).resolve()
+        if manifest_path
+        else _conversion_manifest_path(output)
+    )
+    issues = []
+    if not output.is_file() or output.suffix.casefold() != ".docx":
+        issues.append(f"DOCX 输出不存在：{output}")
+    if not manifest_file.is_file():
+        issues.append(f"转换清单不存在：{manifest_file}")
+        return {
+            "output_path": str(output),
+            "manifest": str(manifest_file),
+            "issues": issues,
+            "passed": False,
+        }
+    try:
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        issues.append(f"转换清单无效：{error}")
+        manifest = {}
+    if not isinstance(manifest, dict):
+        issues.append("转换清单根节点必须是 JSON 对象")
+        manifest = {}
+    required_fields = {
+        "schema_version",
+        "created_at",
+        "source_format",
+        "source",
+        "source_files",
+        "source_sha256",
+        "project_files",
+        "project_sha256",
+        "output",
+        "output_sha256",
+        "template",
+        "template_sha256",
+        "pandoc",
+        "command",
+        "returncode",
+        "duration_seconds",
+        "warnings",
+        "allowed_warnings",
+        "warning_override",
+        "reproduce",
+    }
+    missing_fields = sorted(required_fields - manifest.keys())
+    if missing_fields:
+        issues.append("转换清单缺少必填字段：" + "、".join(missing_fields))
+    string_fields = {
+        "created_at",
+        "source_format",
+        "source",
+        "output",
+        "reproduce",
+    }
+    for field in sorted(string_fields & manifest.keys()):
+        if not isinstance(manifest[field], str) or not manifest[field].strip():
+            issues.append(f"转换清单字段 {field} 必须是非空字符串")
+    list_fields = {
+        "source_files",
+        "project_files",
+        "command",
+        "warnings",
+        "allowed_warnings",
+    }
+    for field in sorted(list_fields & manifest.keys()):
+        value = manifest[field]
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in value
+        ):
+            issues.append(f"转换清单字段 {field} 必须是字符串数组")
+        elif field in {"source_files", "project_files", "command"} and not value:
+            issues.append(f"转换清单字段 {field} 不得为空")
+    hash_fields = {
+        "source_sha256",
+        "project_sha256",
+        "output_sha256",
+    }
+    if manifest.get("template") is not None:
+        hash_fields.add("template_sha256")
+    for field in sorted(hash_fields & manifest.keys()):
+        if not re.fullmatch(r"[0-9a-f]{64}", str(manifest[field])):
+            issues.append(f"转换清单字段 {field} 不是有效的 SHA-256")
+    template_value = manifest.get("template")
+    template_hash = manifest.get("template_sha256")
+    if template_value is not None and (
+        not isinstance(template_value, str) or not template_value.strip()
+    ):
+        issues.append("转换清单字段 template 必须是 null 或非空字符串")
+    if (template_value is None) != (template_hash is None):
+        issues.append("转换清单的 template 与 template_sha256 必须成对记录")
+    pandoc = manifest.get("pandoc")
+    if "pandoc" in manifest:
+        if not isinstance(pandoc, dict):
+            issues.append("转换清单字段 pandoc 必须是对象")
+        elif (
+            not isinstance(pandoc.get("path"), str)
+            or not pandoc["path"].strip()
+            or not (
+                pandoc.get("version") is None
+                or isinstance(pandoc.get("version"), str)
+            )
+        ):
+            issues.append("转换清单字段 pandoc.path/version 类型无效")
+    warning_override = manifest.get("warning_override")
+    if "warning_override" in manifest:
+        if not isinstance(warning_override, dict):
+            issues.append("转换清单字段 warning_override 必须是对象")
+        else:
+            patterns = warning_override.get("patterns")
+            reason = warning_override.get("reason")
+            if not isinstance(patterns, list) or not all(
+                isinstance(item, str) for item in patterns
+            ):
+                issues.append(
+                    "转换清单字段 warning_override.patterns 必须是字符串数组"
+                )
+            if reason is not None and (
+                not isinstance(reason, str) or not reason.strip()
+            ):
+                issues.append(
+                    "转换清单字段 warning_override.reason 必须是 null 或非空字符串"
+                )
+    if type(manifest.get("schema_version")) is not int or manifest.get(
+        "schema_version"
+    ) != 1:
+        issues.append("转换清单 schema_version 不受支持")
+    if type(manifest.get("returncode")) is not int:
+        issues.append("转换清单字段 returncode 必须是整数")
+    elif manifest["returncode"] != 0:
+        issues.append("转换清单记录的 Pandoc 返回码不是 0")
+    duration = manifest.get("duration_seconds")
+    if (
+        isinstance(duration, bool)
+        or not isinstance(duration, (int, float))
+        or duration < 0
+    ):
+        issues.append("转换清单字段 duration_seconds 必须是非负数")
+    created_at = manifest.get("created_at")
+    if isinstance(created_at, str) and created_at.strip():
+        try:
+            datetime.fromisoformat(created_at)
+        except ValueError:
+            issues.append("转换清单字段 created_at 不是有效的 ISO 8601 时间")
+    output_value = manifest.get("output")
+    if isinstance(output_value, str) and output_value.strip() and Path(
+        output_value
+    ).resolve() != output:
+        issues.append("转换清单记录的 DOCX 路径与当前文件不一致")
+    if output.is_file():
+        if manifest.get("output_sha256") != _sha256(output):
+            issues.append("DOCX 哈希与转换清单不一致")
+        try:
+            Document(output)
+        except Exception as error:
+            issues.append(f"DOCX 结构无法读取：{error}")
+
+    source_value = manifest.get("source")
+    source_format = manifest.get("source_format")
+    source = (
+        Path(source_value).resolve()
+        if isinstance(source_value, str) and source_value
+        else None
+    )
+    if source is None:
+        pass
+    elif not source.is_file():
+        issues.append(f"转换源文件不存在：{source_value}")
+    elif source_format == "latex":
+        try:
+            _, root, source_files = _expand_latex_inputs(source)
+            source_hash = _source_bundle_sha256(source_files, root)
+            project_hash, project_files = _project_bundle(
+                root, {output, manifest_file}
+            )
+            if manifest.get("source_sha256") != source_hash:
+                issues.append("LaTeX 源文件哈希与转换清单不一致")
+            if manifest.get("project_sha256") != project_hash:
+                issues.append("LaTeX 项目哈希与转换清单不一致")
+            current_sources = [
+                path.relative_to(root).as_posix() for path in source_files
+            ]
+            current_project = [
+                path.relative_to(root).as_posix() for path in project_files
+            ]
+            if manifest.get("source_files") != current_sources:
+                issues.append("LaTeX 子文件列表与转换清单不一致")
+            if manifest.get("project_files") != current_project:
+                issues.append("LaTeX 项目文件列表与转换清单不一致")
+        except (OSError, RuntimeError, ValueError) as error:
+            issues.append(f"LaTeX 输入复验失败：{error}")
+    elif source_format == "markdown":
+        if source is not None and source.is_file():
+            source_hash = _sha256(source)
+            if manifest.get("source_sha256") != source_hash:
+                issues.append("Markdown 源文件哈希与转换清单不一致")
+            if manifest.get("project_sha256") != source_hash:
+                issues.append("Markdown 项目哈希与转换清单不一致")
+    else:
+        issues.append(f"未知的转换源格式：{source_format}")
+
+    if isinstance(template_value, str) and template_value:
+        template = Path(template_value).resolve()
+        if not template.is_file():
+            issues.append(f"DOCX 参考模板不存在：{template}")
+        elif template_hash != _sha256(template):
+            issues.append("DOCX 参考模板哈希与转换清单不一致")
+    return {
+        "output_path": str(output),
+        "manifest": str(manifest_file),
+        "issues": list(dict.fromkeys(issues)),
+        "passed": not issues,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -785,12 +1352,26 @@ def build_parser():
     gn.add_argument("input", help="输入 .md 文件路径（使用 $$...$$ 或 $...$ 写公式）")
     gn.add_argument("--output", "-o", required=True, help="输出 .docx 路径")
     gn.add_argument("--template", "-t", help="pandoc 参考模板 .docx")
+    gn.add_argument("--timeout", type=int, default=120, help="转换超时秒数")
+    gn.add_argument("--allow-warning", action="append", default=[],
+                    help="允许的 Pandoc 警告正则，可重复使用")
+    gn.add_argument("--override-reason", help="允许警告的具体理由")
+    gn.add_argument("--overwrite", action="store_true", help="覆盖已有转换产物")
 
     # ---- 模式 3: convert-latex（从完整 LaTeX 文档生成） ----
     cv = sub.add_parser("convert-latex", help="将完整 LaTeX 文档转换为 .docx")
     cv.add_argument("input", help="LaTeX 主入口 .tex 文件")
     cv.add_argument("--output", "-o", required=True, help="输出 .docx 路径")
     cv.add_argument("--template", "-t", help="pandoc 参考模板 .docx")
+    cv.add_argument("--timeout", type=int, default=120, help="转换超时秒数")
+    cv.add_argument("--allow-warning", action="append", default=[],
+                    help="允许的 Pandoc 警告正则，可重复使用")
+    cv.add_argument("--override-reason", help="允许警告的具体理由")
+    cv.add_argument("--overwrite", action="store_true", help="覆盖已有转换产物")
+
+    vf = sub.add_parser("verify-conversion", help="复验 DOCX 与转换清单的全部哈希")
+    vf.add_argument("input", help="待复验的 .docx 文件")
+    vf.add_argument("--manifest", help="转换清单路径，默认使用同名 .conversion.json")
 
     return parser
 
@@ -834,6 +1415,10 @@ def main():
             result = markdown_to_docx(
                 args.input, args.output,
                 template_path=args.template,
+                timeout=args.timeout,
+                allow_warnings=args.allow_warning,
+                override_reason=args.override_reason,
+                overwrite=args.overwrite,
             )
         except (OSError, RuntimeError, ValueError) as error:
             print(f"错误：{error}", file=sys.stderr)
@@ -847,6 +1432,10 @@ def main():
             result = latex_to_docx(
                 args.input, args.output,
                 template_path=args.template,
+                timeout=args.timeout,
+                allow_warnings=args.allow_warning,
+                override_reason=args.override_reason,
+                overwrite=args.overwrite,
             )
         except (OSError, RuntimeError, ValueError) as error:
             print(f"错误：{error}", file=sys.stderr)
@@ -854,6 +1443,12 @@ def main():
         print(f"已生成：{result['output_path']}")
         for warning in result["warnings"]:
             print(f"Pandoc 警告：{warning}", file=sys.stderr)
+
+    elif args.mode == "verify-conversion":
+        result = verify_conversion(args.input, args.manifest)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if not result["passed"]:
+            sys.exit(1)
 
     else:
         parser.print_help()

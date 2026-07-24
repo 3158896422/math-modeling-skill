@@ -1,3 +1,6 @@
+import hashlib
+import json
+import os
 import sys
 import tempfile
 import unittest
@@ -9,7 +12,16 @@ from unittest.mock import patch
 SCRIPTS = Path(__file__).resolve().parents[1] / "tools" / "latex" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from latex_paper import build_paper, inspect_paper, prepare_project
+from latex_paper import (
+    _audit_pdf,
+    _font_descriptor_embedded,
+    _replace_pair,
+    build_paper,
+    doctor,
+    inspect_paper,
+    prepare_project,
+    source_bundle_sha256,
+)
 
 
 class LatexPaperTests(unittest.TestCase):
@@ -20,6 +32,7 @@ class LatexPaperTests(unittest.TestCase):
 
             self.assertEqual(Path(result["main_tex"]), output / "main.tex")
             self.assertTrue((output / "references.bib").is_file())
+            self.assertTrue((output / "latex-project.json").is_file())
             with self.assertRaises(FileExistsError):
                 prepare_project(output, contest="cumcm")
 
@@ -46,6 +59,34 @@ class LatexPaperTests(unittest.TestCase):
             self.assertEqual(Path(result["main_tex"]).name, "paper.tex")
             self.assertTrue((root / "paper" / "official.cls").is_file())
             self.assertTrue((root / "paper" / "cover.tex").is_file())
+
+    def test_supports_generic_template_with_nested_main_and_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            template = root / "official"
+            (template / "src").mkdir(parents=True)
+            (template / "src" / "paper.tex").write_text(
+                r"\documentclass{article}\begin{document}x\end{document}",
+                encoding="utf-8",
+            )
+
+            result = prepare_project(
+                root / "paper",
+                contest="generic",
+                template_path=template,
+                main_file="src/paper.tex",
+                template_source="https://contest.example/template",
+                template_version="2026",
+            )
+            manifest = json.loads(
+                (root / "paper" / "latex-project.json").read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(Path(result["main_tex"]), root / "paper/src/paper.tex")
+            self.assertEqual(manifest["main_tex"], "src/paper.tex")
+            self.assertEqual(manifest["template"]["version"], "2026")
+            with self.assertRaisesRegex(ValueError, "必须"):
+                prepare_project(root / "missing", contest="generic")
 
     def test_inspects_nested_sources_figures_tables_and_bibliography(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -150,6 +191,8 @@ See \cite{missing}.\end{document}
                     min_equations=0,
                     min_tables=0,
                     require_pdf=False,
+                    questions=["q1"],
+                    override_reason="单元测试仅检查统一图数量默认值",
                 )
                 self.assertTrue(
                     any("图 0，低于质量目标 8" in issue for issue in report["issues"]),
@@ -196,7 +239,7 @@ See \cite{missing}.\end{document}
 
             with patch(
                 "latex_paper.shutil.which",
-                side_effect=lambda name: "latexmk" if name == "latexmk" else None,
+                side_effect=lambda name: name if name in {"latexmk", "xelatex"} else None,
             ), patch("latex_paper.subprocess.run", side_effect=fake_run):
                 report = build_paper(main)
 
@@ -228,7 +271,7 @@ See \cite{missing}.\end{document}
 
             with patch(
                 "latex_paper.shutil.which",
-                side_effect=lambda name: "latexmk" if name == "latexmk" else None,
+                side_effect=lambda name: name if name in {"latexmk", "xelatex"} else None,
             ), patch("latex_paper.subprocess.run", side_effect=fake_run):
                 report = build_paper(main)
 
@@ -255,6 +298,415 @@ See \cite{missing}.\end{document}
             ):
                 with self.assertRaisesRegex(RuntimeError, "latexmk"):
                     build_paper(main)
+
+    def test_rejects_empty_figures_and_tables_even_when_counts_are_met(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            main = Path(temporary) / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}
+参见图~\ref{fig:q1-empty}与表~\ref{tab:empty}。
+\begin{figure}\caption{空图}\label{fig:q1-empty}\end{figure}
+\begin{table}\caption{空表}\label{tab:empty}\end{table}
+\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            report = inspect_paper(main)
+
+            self.assertFalse(report["passed"])
+            self.assertTrue(any("没有图片或绘图内容" in issue for issue in report["issues"]))
+            self.assertTrue(any("没有表格数据" in issue for issue in report["issues"]))
+
+    def test_counts_each_double_dollar_formula_once(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            main = Path(temporary) / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}
+$$a=1$$
+$$b=2$$
+$$c=3$$
+\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            report = inspect_paper(main)
+
+            self.assertEqual(report["metrics"]["equations"], 3)
+
+    def test_quality_thresholds_require_valid_values_and_override_reason(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            main = Path(temporary) / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "不能为负数"):
+                inspect_paper(main, min_figures=-1)
+            with self.assertRaisesRegex(ValueError, "override_reason"):
+                inspect_paper(
+                    main,
+                    quality_checks=True,
+                    min_figures=1,
+                    require_pdf=False,
+                    questions=["q1"],
+                )
+            with self.assertRaisesRegex(ValueError, "跳过 PDF"):
+                inspect_paper(
+                    main,
+                    contest="mcm-icm",
+                    quality_checks=True,
+                    require_pdf=False,
+                    questions=["q1"],
+                )
+            with self.assertRaisesRegex(ValueError, "min_image_dpi"):
+                inspect_paper(
+                    main,
+                    contest="mcm-icm",
+                    quality_checks=True,
+                    min_image_dpi=150,
+                    questions=["q1"],
+                )
+            report = inspect_paper(
+                main,
+                quality_checks=True,
+                min_figures=1,
+                require_pdf=False,
+                questions=["q1"],
+                override_reason="官方赛题只要求一张图",
+            )
+            self.assertEqual(report["threshold_overrides"][0]["name"], "min_figures")
+
+    def test_requires_each_declared_question_to_have_a_formal_figure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "q1.png").write_bytes(b"png")
+            main = root / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}
+参见图~\ref{fig:q1-result}。
+\begin{figure}\includegraphics{q1.png}\caption{问题一}\label{fig:q1-result}\end{figure}
+\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            report = inspect_paper(
+                main,
+                contest="mcm-icm",
+                quality_checks=True,
+                require_pdf=False,
+                questions=["q1", "q2"],
+                min_figures=1,
+                override_reason="单元测试只构造一张图",
+            )
+
+            self.assertTrue(report["metrics"]["question_figure_coverage"]["q1"])
+            self.assertFalse(report["metrics"]["question_figure_coverage"]["q2"])
+            self.assertTrue(any("q2" in issue for issue in report["issues"]))
+
+    def test_rejects_svg_in_safe_compilation_chain(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "result.svg").write_text("<svg/>", encoding="utf-8")
+            main = root / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}
+参见图~\ref{fig:q1-svg}。
+\begin{figure}\includegraphics{result.svg}\caption{结果}\label{fig:q1-svg}\end{figure}
+\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            report = inspect_paper(main)
+
+            self.assertTrue(any("PDF/PNG/JPG" in issue for issue in report["issues"]))
+
+    def test_warning_build_does_not_publish_unless_explicitly_allowed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            root = parent / "project"
+            root.mkdir()
+            main = root / "main.tex"
+            main.write_text(
+                r"\documentclass{article}\begin{document}ok\end{document}",
+                encoding="utf-8",
+            )
+            published = parent / "完整论文.pdf"
+
+            def fake_run(_command, **kwargs):
+                build = Path(kwargs["cwd"]) / "build"
+                (build / "main.pdf").write_bytes(b"pdf")
+                (build / "main.log").write_text(
+                    "Overfull \\hbox (0.1pt too wide)", encoding="utf-8"
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            patches = (
+                patch(
+                    "latex_paper.shutil.which",
+                    side_effect=lambda name: name if name in {"latexmk", "xelatex"} else None,
+                ),
+                patch("latex_paper.subprocess.run", side_effect=fake_run),
+            )
+            with patches[0], patches[1]:
+                blocked = build_paper(main, publish_path=published)
+            self.assertFalse(blocked["passed"])
+            self.assertFalse(published.exists())
+
+            with patch(
+                "latex_paper.shutil.which",
+                side_effect=lambda name: name if name in {"latexmk", "xelatex"} else None,
+            ), patch("latex_paper.subprocess.run", side_effect=fake_run):
+                allowed = build_paper(
+                    main,
+                    publish_path=published,
+                    allow_warnings=[r"Overfull"],
+                    override_reason="确认 0.1pt 不影响版面",
+                )
+
+            self.assertTrue(allowed["passed"])
+            self.assertTrue(published.is_file())
+            self.assertTrue(published.with_suffix(".build.json").is_file())
+
+    def test_pdf_must_match_current_source_and_build_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            root = parent / "project"
+            root.mkdir()
+            main = root / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}\end{document}
+""",
+                encoding="utf-8",
+            )
+            pdf = parent / "完整论文.pdf"
+            pdf.write_bytes(b"bound pdf")
+            manifest = {
+                "passed": True,
+                "main_tex": "main.tex",
+                "source_sha256": source_bundle_sha256(main),
+                "pdf_sha256": hashlib.sha256(pdf.read_bytes()).hexdigest(),
+            }
+            pdf.with_suffix(".build.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            audit = {
+                "pages": 20,
+                "blank_pages": [],
+                "page_sizes_pt": [[595.3, 841.9]],
+                "unembedded_fonts": [],
+                "raster_images": 0,
+                "min_image_dpi": None,
+                "issues": [],
+            }
+
+            with patch("latex_paper._audit_pdf", return_value=audit):
+                bound = inspect_paper(main, pdf_path=pdf)
+            self.assertTrue(bound["passed"], bound["issues"])
+
+            main.write_text(main.read_text(encoding="utf-8") + "% changed", encoding="utf-8")
+            with patch("latex_paper._audit_pdf", return_value=audit):
+                stale = inspect_paper(main, pdf_path=pdf)
+            self.assertTrue(any("源码哈希" in issue for issue in stale["issues"]))
+
+    def test_pdf_audit_detects_blank_pages_and_page_size_changes(self):
+        from pypdf import PdfWriter
+
+        with tempfile.TemporaryDirectory() as temporary:
+            pdf = Path(temporary) / "paper.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=595, height=842)
+            writer.add_blank_page(width=612, height=792)
+            with pdf.open("wb") as handle:
+                writer.write(handle)
+
+            with patch(
+                "latex_paper._pdf_image_dpi", return_value=([150, 150], [])
+            ):
+                audit = _audit_pdf(
+                    pdf, min_image_dpi=300, require_image_audit=True
+                )
+
+            self.assertEqual(audit["blank_pages"], [1, 2])
+            self.assertTrue(any("页面尺寸不一致" in issue for issue in audit["issues"]))
+            self.assertTrue(any("150 DPI" in issue for issue in audit["issues"]))
+
+    def test_pdf_font_embedding_check_distinguishes_standard_and_external_fonts(self):
+        from pypdf.generic import DictionaryObject, NameObject
+
+        standard = DictionaryObject({
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        })
+        external = DictionaryObject({
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/ExternalFont"),
+        })
+
+        self.assertTrue(_font_descriptor_embedded(standard))
+        self.assertFalse(_font_descriptor_embedded(external))
+
+    def test_doctor_reports_selected_toolchain(self):
+        with patch(
+            "latex_paper.shutil.which",
+            side_effect=lambda name: name if name in {"latexmk", "xelatex"} else None,
+        ), patch("latex_paper._tool_version", return_value="test version"):
+            report = doctor(need_pdf_audit=False)
+
+        self.assertTrue(report["passed"])
+        self.assertEqual(report["tools"]["latexmk"]["path"], "latexmk")
+
+    def test_compilation_runs_in_isolated_copy_and_cannot_modify_original(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            root = parent / "project"
+            root.mkdir()
+            main = root / "main.tex"
+            original = r"\documentclass{article}\begin{document}safe\end{document}"
+            main.write_text(original, encoding="utf-8")
+            published = parent / "paper.pdf"
+
+            def fake_run(_command, **kwargs):
+                isolated = Path(kwargs["cwd"])
+                (isolated / "main.tex").write_text("modified", encoding="utf-8")
+                build = isolated / "build"
+                (build / "main.pdf").write_bytes(b"pdf")
+                (build / "main.log").write_text("clean", encoding="utf-8")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch(
+                "latex_paper.shutil.which",
+                side_effect=lambda name: name
+                if name in {"latexmk", "xelatex"}
+                else None,
+            ), patch("latex_paper.subprocess.run", side_effect=fake_run):
+                report = build_paper(main, publish_path=published)
+
+            self.assertEqual(main.read_text(encoding="utf-8"), original)
+            self.assertFalse(report["passed"])
+            self.assertFalse(published.exists())
+            self.assertTrue(any("隔离编译" in issue for issue in report["issues"]))
+
+    def test_rejects_custom_build_directory_before_compilation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            main = root / "main.tex"
+            main.write_text(
+                r"\documentclass{article}\begin{document}x\end{document}",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "build"):
+                build_paper(main, output_dir=root / "out")
+
+    def test_pair_publish_restores_old_pdf_and_manifest_when_replace_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "new.pdf"
+            target = root / "paper.pdf"
+            manifest = root / "paper.build.json"
+            source.write_bytes(b"new")
+            target.write_bytes(b"old")
+            manifest.write_text('{"old": true}', encoding="utf-8")
+            real_replace = os.replace
+
+            def fail_manifest(source_path, target_path):
+                if (
+                    Path(target_path) == manifest
+                    and ".new-" in Path(source_path).name
+                ):
+                    raise OSError("simulated manifest failure")
+                return real_replace(source_path, target_path)
+
+            with patch("latex_paper.os.replace", side_effect=fail_manifest):
+                with self.assertRaisesRegex(OSError, "simulated"):
+                    _replace_pair(source, target, {"new": True}, overwrite=True)
+
+            self.assertEqual(target.read_bytes(), b"old")
+            self.assertEqual(manifest.read_text(encoding="utf-8"), '{"old": true}')
+
+    def test_verbatim_inputs_and_nocite_star_do_not_create_false_issues(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "references.bib").write_text(
+                "@article{x,title={x}}", encoding="utf-8"
+            )
+            main = root / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}
+\begin{verbatim}\input{ghost}\end{verbatim}
+\verb|\input{also-ghost}|
+\nocite{*}\bibliography{references}
+\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            report = inspect_paper(main)
+
+            self.assertTrue(report["passed"], report["issues"])
+
+    def test_percent_inside_verb_does_not_hide_following_input(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            main = root / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}
+\verb|\input{ignored}%| \input{ghost}
+\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            report = inspect_paper(main)
+
+            self.assertFalse(report["passed"])
+            self.assertTrue(
+                any("ghost.tex" in issue for issue in report["issues"]),
+                report["issues"],
+            )
+            self.assertFalse(
+                any("ignored.tex" in issue for issue in report["issues"]),
+                report["issues"],
+            )
+
+    def test_explicit_missing_pdf_always_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            main = root / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            report = inspect_paper(main, pdf_path=root / "missing.pdf")
+
+            self.assertFalse(report["passed"])
+            self.assertTrue(any("指定的 PDF 不存在" in issue for issue in report["issues"]))
 
 
 if __name__ == "__main__":
