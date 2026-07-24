@@ -70,6 +70,21 @@ class PaperFormatTests(unittest.TestCase):
 
         for expected in ("15000", "公式", "图", "表", "渲染页数"):
             self.assertTrue(any(expected in issue for issue in issues), expected)
+        self.assertTrue(any("低于质量目标 8" in issue for issue in issues))
+
+    def test_other_contests_share_the_eight_figure_default(self):
+        doc = self._front_matter()
+
+        issues = pf.validate_paper_structure(
+            doc,
+            contest="mcm-icm",
+            min_content_units=0,
+            min_equations=0,
+            min_tables=0,
+            require_rendered_pages=False,
+        )
+
+        self.assertTrue(any("低于质量目标 8" in issue for issue in issues))
 
     def test_table_caption_must_be_referenced_in_body(self):
         doc = self._front_matter()

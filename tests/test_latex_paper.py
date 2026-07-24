@@ -128,6 +128,34 @@ See \cite{missing}.\end{document}
 
             self.assertTrue(any("重复 label" in item for item in issues))
 
+    def test_all_contests_share_the_eight_figure_quality_default(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            main = Path(temporary) / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}summary\keywords{test}\end{abstract}
+\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            for contest in ("cumcm", "mcm-icm"):
+                report = inspect_paper(
+                    main,
+                    contest=contest,
+                    quality_checks=True,
+                    min_content_units=0,
+                    min_pages=0,
+                    min_equations=0,
+                    min_tables=0,
+                    require_pdf=False,
+                )
+                self.assertTrue(
+                    any("图 0，低于质量目标 8" in issue for issue in report["issues"]),
+                    (contest, report["issues"]),
+                )
+
     def test_rejects_sources_outside_project_and_missing_engine(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

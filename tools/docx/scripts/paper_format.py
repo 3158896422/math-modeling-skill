@@ -391,14 +391,14 @@ def validate_paper_structure(
     if contest.lower() == "cumcm":
         min_content_units = 15000 if min_content_units is None else min_content_units
         min_equations = 5 if min_equations is None else min_equations
-        min_figures = 3 if min_figures is None else min_figures
+        min_figures = 8 if min_figures is None else min_figures
         min_tables = 3 if min_tables is None else min_tables
         target_pages = 20 if target_pages is None else target_pages
         official_max_pages = 30 if official_max_pages is None else official_max_pages
     else:
         min_content_units = 0 if min_content_units is None else min_content_units
         min_equations = 0 if min_equations is None else min_equations
-        min_figures = 0 if min_figures is None else min_figures
+        min_figures = 8 if min_figures is None else min_figures
         min_tables = 0 if min_tables is None else min_tables
 
     all_text = "\n".join(_document_texts(doc))

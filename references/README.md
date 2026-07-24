@@ -14,7 +14,7 @@
 | 阶段 | 入口 | 固定交付物 |
 |---|---|---|
 | 建模分析 | `roles/建模手/SKILL.md` | `题目分析报告.md`、`术语表格.md` |
-| 代码实现 | `roles/编程手/SKILL.md` | Python/MATLAB 代码、结果表格、三类图、复现清单 |
+| 代码实现 | `roles/编程手/SKILL.md` | Python/MATLAB 代码、结果表格、三类各至少 3 张且覆盖全部子问题的候选图、复现清单 |
 | 论文撰写 | `roles/论文手/SKILL.md` | 默认同时交付 `完整论文.docx`、LaTeX 源码项目与编译 PDF |
 
 ## 按任务加载

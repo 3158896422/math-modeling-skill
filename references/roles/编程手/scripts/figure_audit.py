@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import struct
 import sys
 import xml.etree.ElementTree as ET
@@ -68,7 +69,14 @@ def audit_figure_directory(
     *,
     min_dpi: int = 300,
     require_categories: bool = True,
+    min_per_category: int = 3,
+    questions: tuple[str, ...] = (),
 ) -> dict:
+    if min_per_category < 1:
+        raise ValueError("每类候选图最低数量必须大于等于 1")
+    normalized_questions = tuple(dict.fromkeys(question.strip().casefold() for question in questions))
+    if any(not re.fullmatch(r"q[1-9]\d*", question) for question in normalized_questions):
+        raise ValueError("子问题标识必须使用 q1、q2 等格式")
     directory = Path(figures_dir).expanduser().resolve()
     issues: list[dict[str, str]] = []
     files: dict[str, dict] = {}
@@ -76,6 +84,7 @@ def audit_figure_directory(
         return {
             "ok": False,
             "directory": str(directory),
+            "questions": list(normalized_questions),
             "files": files,
             "issues": [{"severity": "FAIL", "message": "figures 目录不存在"}],
         }
@@ -115,23 +124,51 @@ def audit_figure_directory(
             })
 
     if require_categories:
-        stems = tuple(by_stem)
         for prefix in REQUIRED_CATEGORIES:
-            if not any(stem.startswith(prefix) for stem in stems):
-                issues.append({"severity": "FAIL", "message": f"缺少 {prefix} 类候选图"})
+            count = sum(stem.startswith(prefix) for stem in by_stem)
+            if count < min_per_category:
+                issues.append({
+                    "severity": "FAIL",
+                    "message": (
+                        f"{prefix} 类候选图仅 {count} 张，"
+                        f"低于每类最低 {min_per_category} 张"
+                    ),
+                })
+        if not normalized_questions:
+            issues.append({
+                "severity": "FAIL",
+                "message": "未提供全部子问题标识；请使用 --questions q1 q2 ...",
+            })
+        for question in normalized_questions:
+            for prefix in REQUIRED_CATEGORIES:
+                marker = f"{prefix}{question}_"
+                if not any(stem.startswith(marker) for stem in by_stem):
+                    issues.append({
+                        "severity": "FAIL",
+                        "message": f"子问题 {question} 缺少 {prefix} 类候选图",
+                    })
 
     return {
         "ok": not any(item["severity"] == "FAIL" for item in issues),
         "directory": str(directory),
+        "questions": list(normalized_questions),
         "files": files,
         "issues": issues,
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="检查三类候选图、SVG 可编辑文本和 PNG DPI")
+    parser = argparse.ArgumentParser(description="检查三类候选图数量、SVG 可编辑文本和 PNG DPI")
     parser.add_argument("figures_dir", help="PROJECT_ROOT 下的 figures 目录")
     parser.add_argument("--min-dpi", type=int, default=300)
+    parser.add_argument("--min-per-category", type=int, default=3, help="每类逻辑候选图最低数量")
+    parser.add_argument(
+        "--questions",
+        nargs="+",
+        default=(),
+        metavar="Q",
+        help="题目全部子问题标识，例如 q1 q2 q3",
+    )
     parser.add_argument("--no-category-check", action="store_true", help="仅检查已有图，不要求三类前缀")
     parser.add_argument("--strict", action="store_true", help="存在 FAIL 时返回非零退出码")
     args = parser.parse_args()
@@ -139,6 +176,8 @@ def main() -> int:
         args.figures_dir,
         min_dpi=args.min_dpi,
         require_categories=not args.no_category_check,
+        min_per_category=args.min_per_category,
+        questions=tuple(args.questions),
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 1 if args.strict and not report["ok"] else 0

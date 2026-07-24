@@ -196,17 +196,58 @@ class PlotStyleTests(unittest.TestCase):
 
 
 class FigureAuditTests(unittest.TestCase):
-    def test_accepts_three_categories_with_svg_png_pairs(self):
+    def test_accepts_three_candidates_per_category_with_svg_png_pairs(self):
         with tempfile.TemporaryDirectory() as tmp:
             figures = Path(tmp)
-            for stem in ("raw_data", "process_loss", "result_solution"):
+            for prefix in ("raw", "process", "result"):
+                for question in ("q1", "q2", "q3"):
+                    stem = f"{prefix}_{question}_candidate"
+                    _write_svg(figures / f"{stem}.svg")
+                    _write_png(figures / f"{stem}.png", 300)
+
+            report = figure_audit.audit_figure_directory(
+                figures,
+                questions=("q1", "q2", "q3"),
+            )
+
+        self.assertTrue(report["ok"], report["issues"])
+        self.assertEqual(report["questions"], ["q1", "q2", "q3"])
+        self.assertEqual(report["issues"], [])
+
+    def test_rejects_global_shortage_and_uncovered_questions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            figures = Path(tmp)
+            for stem in ("raw_q1_data", "process_q1_loss", "result_q1_solution"):
                 _write_svg(figures / f"{stem}.svg")
                 _write_png(figures / f"{stem}.png", 300)
 
+            report = figure_audit.audit_figure_directory(
+                figures,
+                questions=("q1", "q2"),
+            )
+
+        self.assertFalse(report["ok"])
+        messages = "\n".join(item["message"] for item in report["issues"])
+        self.assertIn("raw_ 类候选图仅 1 张，低于每类最低 3 张", messages)
+        self.assertIn("process_ 类候选图仅 1 张，低于每类最低 3 张", messages)
+        self.assertIn("result_ 类候选图仅 1 张，低于每类最低 3 张", messages)
+        self.assertIn("子问题 q2 缺少 raw_ 类候选图", messages)
+        self.assertIn("子问题 q2 缺少 process_ 类候选图", messages)
+        self.assertIn("子问题 q2 缺少 result_ 类候选图", messages)
+
+    def test_requires_explicit_complete_question_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            figures = Path(tmp)
+            for prefix in ("raw", "process", "result"):
+                for index in range(3):
+                    stem = f"{prefix}_q1_candidate_{index + 1}"
+                    _write_svg(figures / f"{stem}.svg")
+                    _write_png(figures / f"{stem}.png", 300)
+
             report = figure_audit.audit_figure_directory(figures)
 
-        self.assertTrue(report["ok"], report["issues"])
-        self.assertEqual(report["issues"], [])
+        self.assertFalse(report["ok"])
+        self.assertTrue(any("未提供全部子问题标识" in item["message"] for item in report["issues"]))
 
     def test_rejects_low_dpi_and_missing_editable_text(self):
         with tempfile.TemporaryDirectory() as tmp:
