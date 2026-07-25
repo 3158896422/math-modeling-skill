@@ -4,7 +4,7 @@
 
 **面向数学建模竞赛与建模项目的三阶段工作流**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](VERSION)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](VERSION)
 [![Agent Skill](https://img.shields.io/badge/Agent-Skill-4B8BBE.svg)](SKILL.md)
 
 **关注我**
