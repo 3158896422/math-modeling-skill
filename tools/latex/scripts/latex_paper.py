@@ -25,6 +25,10 @@ CONTESTS = {"cumcm", "mcm-icm", "generic"}
 ENGINES = {"xelatex", "lualatex", "pdflatex"}
 GRAPHIC_SUFFIXES = (".pdf", ".png", ".jpg", ".jpeg")
 UNSUPPORTED_GRAPHIC_SUFFIXES = (".svg", ".eps")
+LATEX_AUTHORING_SUFFIXES = {
+    ".tex", ".bib", ".cls", ".sty", ".bst", ".def", ".cfg", ".clo", ".fd",
+    ".bbx", ".cbx", ".lbx", ".dtx", ".ins", ".ltx",
+}
 GENERATED_SUFFIXES = {
     ".aux", ".log", ".out", ".toc", ".bbl", ".blg", ".bcf", ".fls",
     ".fdb_latexmk", ".synctex.gz", ".run.xml", ".lof", ".lot", ".nav",
@@ -44,6 +48,7 @@ LITERAL_ENV_RE = re.compile(
     re.S,
 )
 VERB_RE = re.compile(r"\\verb\*?(?P<delimiter>[^\w\s]).*?(?P=delimiter)")
+APPENDIX_RE = re.compile(r"\\appendix\b|\\begin\s*\{appendices\}")
 QUALITY_DEFAULTS = {
     "cumcm": {
         "min_content_units": 15_000,
@@ -120,6 +125,16 @@ def _tree_sha256(path: Path) -> str:
         digest.update(item.read_bytes())
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _file_hashes(path: Path) -> dict[str, str]:
+    if path.is_file():
+        return {"main.tex": _sha256(path)}
+    return {
+        item.relative_to(path).as_posix(): _sha256(item)
+        for item in sorted(path.rglob("*"))
+        if item.is_file()
+    }
 
 
 def _atomic_json(path: Path, payload: dict) -> None:
@@ -255,6 +270,8 @@ def prepare_project(
             "version": template_version,
             "sha256": _tree_sha256(source),
         },
+        "template_files": _file_hashes(source),
+        "resource_bindings": [],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -296,6 +313,156 @@ def _project_root(main_tex: Path) -> Path:
             )
         return candidate
     return main.parent
+
+
+def _validated_resource_bindings(manifest: dict) -> list[dict]:
+    bindings = manifest.get("resource_bindings", [])
+    if not isinstance(bindings, list):
+        raise ValueError("resource_bindings 必须为列表")
+    for index, binding in enumerate(bindings):
+        if not isinstance(binding, dict):
+            raise ValueError(f"resource_bindings[{index}] 必须为对象")
+        for key in ("source", "destination", "sha256"):
+            if not isinstance(binding.get(key), str) or not binding[key]:
+                raise ValueError(f"resource_bindings[{index}].{key} 必须为非空字符串")
+        if binding.get("hash_mode", "tree") not in {"content", "tree"}:
+            raise ValueError(
+                f"resource_bindings[{index}].hash_mode 必须是 content 或 tree"
+            )
+    return bindings
+
+
+def _resource_hash(path: Path, mode: str) -> str:
+    if mode == "content":
+        if not path.is_file():
+            raise ValueError("content 哈希只能用于单文件资源")
+        return _sha256(path)
+    return _tree_sha256(path)
+
+
+def _resource_binding_issues(root: Path) -> list[str]:
+    manifest_path = root / PROJECT_MANIFEST
+    if not manifest_path.is_file():
+        return []
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        bindings = _validated_resource_bindings(manifest)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        return [f"LaTeX 资源绑定清单无效：{error}"]
+
+    issues = []
+    bound_destinations = set()
+    project_root = root.parent.resolve()
+    for binding in bindings:
+        try:
+            source = _inside(project_root / binding["source"], project_root)
+            destination = _inside(root / binding["destination"], root)
+            if source == project_root:
+                raise ValueError("权威资源不能是 PROJECT_ROOT 根目录")
+            if source == root or root in source.parents:
+                raise ValueError("权威资源不能位于 LaTeX 项目副本内")
+            _reject_symlinks(source)
+            expected = binding["sha256"]
+            hash_mode = binding.get("hash_mode", "tree")
+            bound_destinations.add(destination.relative_to(root))
+            if not source.exists() or not destination.exists():
+                issues.append(
+                    f"资源绑定缺失：{binding['source']} -> {binding['destination']}"
+                )
+            elif (
+                _resource_hash(source, hash_mode) != expected
+                or _resource_hash(destination, hash_mode) != expected
+            ):
+                issues.append(
+                    f"资源副本已漂移：{binding['source']} -> {binding['destination']}；"
+                    "同步两端后重新执行 bind"
+                )
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            issues.append(f"LaTeX 资源绑定无效：{error}")
+
+    template_files = manifest.get(
+        "template_files", manifest.get("template_resource_files", {})
+    )
+    if not isinstance(template_files, dict):
+        issues.append("LaTeX 资源绑定清单无效：template_files 必须为对象")
+        template_files = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path == manifest_path:
+            continue
+        relative = path.relative_to(root)
+        if relative.parts[0] == "build":
+            continue
+        suffix = path.suffix.casefold()
+        compound_suffix = "".join(path.suffixes[-2:]).casefold()
+        if (
+            suffix in LATEX_AUTHORING_SUFFIXES
+            or suffix in GENERATED_SUFFIXES
+            or compound_suffix in GENERATED_SUFFIXES
+            or path.name.endswith((".build.json", ".conversion.json"))
+        ):
+            continue
+        if any(relative == bound or bound in relative.parents for bound in bound_destinations):
+            continue
+        template_hash = template_files.get(relative.as_posix())
+        if template_hash and _sha256(path) == template_hash:
+            continue
+        issues.append(
+            f"LaTeX 资源副本未绑定：{relative.as_posix()}；"
+            "必须绑定到 PROJECT_ROOT 权威来源"
+        )
+    return issues
+
+
+def bind_resource(main_tex: Path, source_path: Path, destination: str) -> dict:
+    """把 LaTeX 项目内的现有资源副本绑定到 PROJECT_ROOT 权威来源。"""
+    main = main_tex.resolve()
+    root = _project_root(main)
+    manifest_path = root / PROJECT_MANIFEST
+    if not manifest_path.is_file():
+        raise ValueError(f"缺少 {PROJECT_MANIFEST}，无法记录资源绑定")
+    project_root = root.parent.resolve()
+    source = _inside(source_path, project_root)
+    if source == project_root:
+        raise ValueError("权威资源不能是 PROJECT_ROOT 根目录")
+    if source == root or root in source.parents:
+        raise ValueError("权威资源必须位于 LaTeX 项目之外的 PROJECT_ROOT 中")
+    _reject_symlinks(source)
+    relative_destination = Path(destination)
+    if relative_destination.is_absolute() or ".." in relative_destination.parts:
+        raise ValueError("资源副本路径必须位于 LaTeX 项目内")
+    target = _inside(root / relative_destination, root)
+    if not source.exists() or not target.exists():
+        raise FileNotFoundError("权威资源或 LaTeX 资源副本不存在")
+    if source.is_file() != target.is_file():
+        raise ValueError("权威资源与 LaTeX 资源副本类型不一致")
+    hash_mode = "content" if source.is_file() else "tree"
+    source_hash = _resource_hash(source, hash_mode)
+    if _resource_hash(target, hash_mode) != source_hash:
+        raise ValueError("权威资源与 LaTeX 资源副本内容不一致，不能建立绑定")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    existing_bindings = _validated_resource_bindings(manifest)
+    bindings = [
+        item
+        for item in existing_bindings
+        if item.get("destination") != target.relative_to(root).as_posix()
+    ]
+    binding = {
+        "source": source.relative_to(project_root).as_posix(),
+        "destination": target.relative_to(root).as_posix(),
+        "sha256": source_hash,
+        "hash_mode": hash_mode,
+        "bound_at": datetime.now(timezone.utc).isoformat(),
+    }
+    bindings.append(binding)
+    manifest["resource_bindings"] = bindings
+    _atomic_json(manifest_path, manifest)
+    return {
+        "passed": True,
+        "main_tex": str(main),
+        "binding": binding,
+        "manifest": str(manifest_path),
+    }
 
 
 def _strip_comments(text: str) -> str:
@@ -427,8 +594,8 @@ def _display_equations(source: str, issues: list[str]) -> int:
         r"multline\*?|displaymath|eqnarray\*?)\}",
         source,
     ))
-    opens = len(re.findall(r"\\\[", source))
-    closes = len(re.findall(r"\\\]", source))
+    opens = len(re.findall(r"(?<!\\)(?:\\\\)*\\\[", source))
+    closes = len(re.findall(r"(?<!\\)(?:\\\\)*\\\]", source))
     if opens != closes:
         issues.append(r"行间公式分隔符 \[ 与 \] 数量不一致")
     dollars = len(re.findall(r"(?<!\\)\$\$", source))
@@ -560,6 +727,7 @@ def _audit_pdf(path: Path, *, min_image_dpi: int, require_image_audit: bool) -> 
     reader = PdfReader(path)
     blank_pages = []
     page_sizes = []
+    page_texts = []
     unembedded_fonts = set()
     for number, page in enumerate(reader.pages, 1):
         width = round(float(page.mediabox.width), 1)
@@ -578,6 +746,7 @@ def _audit_pdf(path: Path, *, min_image_dpi: int, require_image_audit: bool) -> 
             text = page.extract_text() or ""
         except Exception:
             text = ""
+        page_texts.append(text)
         if not text.strip() and not xobjects and not content_bytes.strip():
             blank_pages.append(number)
         fonts = resources.get("/Font", {})
@@ -612,8 +781,36 @@ def _audit_pdf(path: Path, *, min_image_dpi: int, require_image_audit: bool) -> 
         "unembedded_fonts": sorted(unembedded_fonts),
         "raster_images": len(dpi_values) // 2,
         "min_image_dpi": min(dpi_values) if dpi_values else None,
+        "_page_texts": page_texts,
         "issues": issues,
     }
+
+
+def _appendix_start_page(source: str, page_texts: list[str]) -> int | None:
+    match = APPENDIX_RE.search(source)
+    if not match:
+        return None
+    tail = source[match.end():]
+    headings = re.findall(
+        r"\\(?:part|chapter|section)\*?(?:\[[^]]*\])?\s*\{([^{}]+)\}",
+        tail,
+    )
+    candidates = []
+    for heading in headings[:2]:
+        plain = re.sub(r"\\[A-Za-z@]+\*?(?:\[[^]]*\])?", "", heading)
+        plain = re.sub(r"[{}~\s]", "", plain).casefold()
+        if len(plain) >= 2:
+            candidates.append(plain)
+    candidates.extend(("附录", "appendix"))
+    matches = {
+        number
+        for number, text in enumerate(page_texts, 1)
+        if any(
+            candidate in re.sub(r"\s+", "", text).casefold()
+            for candidate in candidates
+        )
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
 
 
 def _build_manifest_path(pdf: Path) -> Path:
@@ -653,6 +850,8 @@ def inspect_paper(
     min_content_units: int | None = None,
     min_pages: int | None = None,
     max_pages: int | None = None,
+    body_start_page: int | None = None,
+    appendix_start_page: int | None = None,
     min_equations: int | None = None,
     min_figures: int | None = None,
     min_tables: int | None = None,
@@ -666,12 +865,26 @@ def inspect_paper(
         raise ValueError(f"不支持的竞赛配置：{contest}")
     if min_image_dpi <= 0:
         raise ValueError("min_image_dpi 必须为正整数")
+    for name, value in (
+        ("body_start_page", body_start_page),
+        ("appendix_start_page", appendix_start_page),
+    ):
+        if value is not None and value <= 0:
+            raise ValueError(f"{name} 必须为正整数")
     main = main_tex.resolve()
     if not main.is_file() or main.suffix.casefold() != ".tex":
         raise FileNotFoundError(f"LaTeX 入口不存在：{main}")
     root = _project_root(main)
     source, source_files, issues = _collect_sources(main)
     _reject_symlinks(root)
+    issues.extend(_resource_binding_issues(root))
+    has_appendix = bool(APPENDIX_RE.search(source))
+    if appendix_start_page is not None and not has_appendix:
+        raise ValueError("--appendix-start-page 只能用于包含 \\appendix 或 appendices 环境的源码")
+    if contest != "cumcm" and (
+        body_start_page is not None or appendix_start_page is not None
+    ):
+        raise ValueError("正文与附录页码参数仅适用于已核验正文上限规则的 CUMCM")
     if DANGEROUS_TEX.search(source):
         issues.append("源码包含被禁用的 TeX 文件或命令执行指令")
     if "\\begin{document}" not in source or "\\end{document}" not in source:
@@ -821,6 +1034,7 @@ def inspect_paper(
 
     source_hash = source_bundle_sha256(main)
     rendered_pages = None
+    body_pages = None
     pdf_audit = None
     build_manifest = None
     pdf = pdf_path.resolve() if pdf_path else None
@@ -844,7 +1058,40 @@ def inspect_paper(
                 require_image_audit=quality_checks,
             )
             rendered_pages = pdf_audit["pages"]
+            page_texts = pdf_audit.pop("_page_texts", [])
             issues.extend(pdf_audit["issues"])
+            if contest == "cumcm":
+                body_start = body_start_page or 2
+                detected_appendix = (
+                    _appendix_start_page(source, page_texts) if has_appendix else None
+                )
+                appendix_start = appendix_start_page or detected_appendix
+                body_end = appendix_start or (rendered_pages + 1)
+                if (
+                    appendix_start_page is not None
+                    and detected_appendix is not None
+                    and appendix_start_page != detected_appendix
+                ):
+                    issues.append(
+                        f"显式附录起始页 {appendix_start_page} 与 PDF 自动定位页 "
+                        f"{detected_appendix} 不一致"
+                    )
+                if body_start > rendered_pages + 1:
+                    issues.append(
+                        f"正文起始页 {body_start} 超出 PDF 总页数 {rendered_pages}"
+                    )
+                elif body_end < body_start or body_end > rendered_pages + 1:
+                    issues.append(
+                        f"附录起始页 {body_end} 与正文起始页 {body_start}、"
+                        f"PDF 总页数 {rendered_pages} 不一致"
+                    )
+                elif has_appendix and appendix_start is None and max_pages is not None:
+                    issues.append(
+                        "无法自动定位附录起始页；请通过 --appendix-start-page "
+                        "提供附录在 PDF 中的第一页"
+                    )
+                else:
+                    body_pages = body_end - body_start
         except Exception as error:
             issues.append(f"PDF 检查失败：{error}")
     elif pdf is not None:
@@ -881,8 +1128,11 @@ def inspect_paper(
     minimum_pages = threshold_values["min_pages"]
     if rendered_pages is not None and minimum_pages and rendered_pages < minimum_pages:
         issues.append(f"预警：实际页数 {rendered_pages}，低于质量目标 {minimum_pages}")
-    if rendered_pages is not None and max_pages is not None and rendered_pages > max_pages:
-        issues.append(f"实际页数 {rendered_pages}，超过官方上限 {max_pages}")
+    if max_pages is not None:
+        if contest == "cumcm" and body_pages is not None and body_pages > max_pages:
+            issues.append(f"正文页数 {body_pages}，超过官方上限 {max_pages}")
+        elif contest != "cumcm" and rendered_pages is not None and rendered_pages > max_pages:
+            issues.append(f"PDF 总页数 {rendered_pages}，超过官方上限 {max_pages}")
 
     return {
         "main_tex": str(main),
@@ -890,6 +1140,8 @@ def inspect_paper(
         "pdf_path": str(pdf) if pdf else None,
         "source_sha256": source_hash,
         "rendered_pages": rendered_pages,
+        "body_pages": body_pages,
+        "page_limit_scope": "body" if contest == "cumcm" else "total",
         "pdf_audit": pdf_audit,
         "build_manifest": build_manifest,
         "thresholds": threshold_values,
@@ -988,6 +1240,9 @@ def build_paper(
         raise FileNotFoundError(f"LaTeX 入口不存在：{main}")
     root = _project_root(main)
     _reject_symlinks(root)
+    binding_issues = _resource_binding_issues(root)
+    if binding_issues:
+        raise ValueError("；".join(binding_issues))
     source, _, source_issues = _collect_sources(main)
     if source_issues:
         raise ValueError("；".join(source_issues))
@@ -1018,7 +1273,9 @@ def build_paper(
         if not overwrite and (publish_target.exists() or publish_manifest.exists()):
             raise FileExistsError(f"发布产物已存在，拒绝覆盖：{publish_target}")
 
-    latexmk = shutil.which("latexmk")
+    latexmk_path = shutil.which("latexmk")
+    latexmk_version = _tool_version(latexmk_path)
+    latexmk = latexmk_path if latexmk_version else None
     executable = shutil.which(engine)
     if executable is None:
         raise RuntimeError(f"未找到 {engine}，无法编译 LaTeX 论文")
@@ -1042,7 +1299,7 @@ def build_paper(
         ]]
     elif executable:
         if re.search(r"\\(?:bibliography|addbibresource)\b", source):
-            raise RuntimeError("未找到 latexmk，含外部参考文献的论文无法完成可靠编译")
+            raise RuntimeError("未找到可执行的 latexmk，含外部参考文献的论文无法完成可靠编译")
         command = [
             executable,
             "-no-shell-escape",
@@ -1161,7 +1418,7 @@ def build_paper(
             "tools": {
                 "latexmk": {
                     "path": latexmk,
-                    "version": _tool_version(latexmk),
+                    "version": latexmk_version,
                 },
                 engine: {
                     "path": executable,
@@ -1289,6 +1546,11 @@ def _parser() -> argparse.ArgumentParser:
     init.add_argument("--template-source")
     init.add_argument("--template-version")
 
+    bind = commands.add_parser("bind", help="绑定 LaTeX 资源副本与 PROJECT_ROOT 权威来源")
+    bind.add_argument("main_tex", type=Path)
+    bind.add_argument("source", type=Path)
+    bind.add_argument("destination")
+
     build = commands.add_parser("build", help="编译并按门禁发布 LaTeX 项目")
     build.add_argument("main_tex", type=Path)
     build.add_argument("--engine", choices=sorted(ENGINES), default="xelatex")
@@ -1307,6 +1569,8 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--min-content-units", type=int)
     validate.add_argument("--min-pages", type=int)
     validate.add_argument("--max-pages", type=int)
+    validate.add_argument("--body-start-page", type=int)
+    validate.add_argument("--appendix-start-page", type=int)
     validate.add_argument("--min-equations", type=int)
     validate.add_argument("--min-figures", type=int)
     validate.add_argument("--min-tables", type=int)
@@ -1350,6 +1614,12 @@ def main() -> int:
                 template_source=arguments.template_source,
                 template_version=arguments.template_version,
             )
+        elif arguments.action == "bind":
+            result = bind_resource(
+                arguments.main_tex,
+                arguments.source,
+                arguments.destination,
+            )
         elif arguments.action == "build":
             result = build_paper(
                 arguments.main_tex,
@@ -1370,6 +1640,8 @@ def main() -> int:
                 min_content_units=arguments.min_content_units,
                 min_pages=arguments.min_pages,
                 max_pages=arguments.max_pages,
+                body_start_page=arguments.body_start_page,
+                appendix_start_page=arguments.appendix_start_page,
                 min_equations=arguments.min_equations,
                 min_figures=arguments.min_figures,
                 min_tables=arguments.min_tables,

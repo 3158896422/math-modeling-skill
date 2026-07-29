@@ -11,7 +11,7 @@ description: 从官方或内置模板创建、编译和校验数学建模 LaTeX 
 - 模板和脚本从本目录读取；论文项目只写入 `PROJECT_ROOT`。
 - 官方模板、题目附件和 Skill 文件保持只读；先复制，再填充。
 - 默认不覆盖已有输出目录。
-- 初始化生成 `latex-project.json`，记录主入口、竞赛配置、模板来源、版本与哈希；不要手工删除或伪造。
+- 初始化生成 `latex-project.json`，记录主入口、竞赛配置、模板来源、版本、哈希与资源绑定；不要手工删除或伪造。
 
 ## 环境诊断
 
@@ -46,7 +46,25 @@ python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" init `
   --template-version "<适用届次或版本>"
 ```
 
-没有官方模板时同时省略 `--template`、`--main` 和模板元数据。官方模板入口为 `main.tex` 或只有一个顶层 `.tex` 时可省略 `--main`；入口位于子目录或存在多个候选文件时必须按官方说明显式指定，不能猜测。CUMCM、MCM/ICM 以外的竞赛使用 `--contest generic`，且必须提供当届官方模板。初始化后在复制件中填充正文，并把真实图表与核验后的 BibTeX 条目放入项目；不得修改模板源文件。
+没有官方模板时同时省略 `--template`、`--main` 和模板元数据。官方模板入口为 `main.tex` 或只有一个顶层 `.tex` 时可省略 `--main`；入口位于子目录或存在多个候选文件时必须按官方说明显式指定，不能猜测。CUMCM、MCM/ICM 以外的竞赛使用 `--contest generic`，且必须提供当届官方模板。初始化后在复制件中填充正文，并把核验后的 BibTeX 条目放入项目；不得修改模板源文件。
+
+## 绑定代码与图表资源
+
+代码和图表的权威版本保留在 `PROJECT_ROOT`，不要只在 LaTeX 项目中维护第二份。把需要随论文交付的代码或图表复制到 LaTeX 项目后，立即建立哈希绑定：
+
+```powershell
+python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" bind `
+  "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" `
+  "<PROJECT_ROOT>/figures" `
+  "figs"
+
+python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" bind `
+  "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" `
+  "<PROJECT_ROOT>/code" `
+  "code"
+```
+
+权威代码位于项目根目录时也可逐文件绑定，例如把 `<PROJECT_ROOT>/问题1_求解.py` 绑定到现有副本 `code/问题1_求解.py`。命令只在权威来源与现有副本内容一致时写入 `latex-project.json`，不会替用户复制或覆盖文件。权威来源或副本变化后，先重新同步文件，再重跑 `bind`。校验和编译会扫描任意目录中的新增或已修改代码、数据和图像资源，并阻断缺失、未绑定或哈希漂移的副本，不局限于固定目录名。
 
 ## 编译
 
@@ -84,18 +102,22 @@ python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" validate `
   --quality-checks `
   --questions q1 q2 q3 `
   --min-image-dpi 300 `
-  --max-pages <当届官方上限>
+  --max-pages <当届官方正文上限> `
+  --body-start-page <正文在PDF中的第一页>
 ```
+
+论文包含附录时再加 `--appendix-start-page <附录在PDF中的第一页>`，且源码必须真实包含 `\appendix` 或 `appendices` 环境。CUMCM 电子版 PDF 若第 1 页为摘要、正文从第 2 页开始，可传 `--body-start-page 2`；必须以实际 PDF 和当届官方模板为准。工具会尝试根据附录首个章节标题自动定位，但无法唯一定位时会阻断并要求显式页码，不能退回用 PDF 总页数猜测正文页数。`mcm-icm` 与 `generic` 的 `--max-pages` 默认校验 PDF 总页数，不套用 CUMCM 的正文口径，也不接受正文/附录页码参数。
 
 校验器递归读取项目内的 `\input` 与 `\include`，忽略 `verbatim`、`lstlisting`、`minted`、`comment` 和 `\verb` 中的伪命令，并检查：
 
 - 摘要、关键词和未清理占位符；
-- 字词单位、成对的行间公式、非空图/表和编译后实际页数；
+- 字词单位、成对的行间公式、非空图/表、PDF 总页数和正文页数；
 - 图片文件是否存在，`label` 是否重复，图表是否有题注、真实内容和图表环境外的正文引用；
 - `fig:q1-*` 等标签是否覆盖 `--questions` 声明的全部子问题；
 - `\cite` 是否能在 BibTeX 或 `\bibitem` 中找到对应条目；
 - 手工参考文献是否被正文引用；
 - PDF 是否由当前源码构建，源码与 PDF 哈希是否匹配；
+- LaTeX 项目中的代码和图表副本是否与 `PROJECT_ROOT` 权威来源绑定且未漂移；
 - PDF 空白页、页面尺寸、字体嵌入和内嵌位图 DPI。
 
 CUMCM 的约 15000 字词单位、约 20 页、5 个公式和 3 个表只是可覆盖的完整度质量目标。CUMCM 与 MCM/ICM 均默认至少 8 幅图；页数上限等官方硬约束必须从目标届次规则读取后通过参数传入。MCM/ICM 不内置永久页数阈值。

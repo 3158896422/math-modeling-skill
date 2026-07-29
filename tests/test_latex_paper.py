@@ -12,6 +12,7 @@ from unittest.mock import patch
 SCRIPTS = Path(__file__).resolve().parents[1] / "tools" / "latex" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
+import latex_paper
 from latex_paper import (
     _audit_pdf,
     _font_descriptor_embedded,
@@ -240,6 +241,8 @@ See \cite{missing}.\end{document}
             with patch(
                 "latex_paper.shutil.which",
                 side_effect=lambda name: name if name in {"latexmk", "xelatex"} else None,
+            ), patch(
+                "latex_paper._tool_version", return_value="test version"
             ), patch("latex_paper.subprocess.run", side_effect=fake_run):
                 report = build_paper(main)
 
@@ -338,6 +341,42 @@ $$c=3$$
             report = inspect_paper(main)
 
             self.assertEqual(report["metrics"]["equations"], 3)
+
+    def test_line_break_spacing_is_not_counted_as_display_math(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            main = Path(temporary) / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\\[0.4em]\keywords{测试}\end{abstract}
+\[a=1\]
+\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            report = inspect_paper(main)
+
+            self.assertEqual(report["metrics"]["equations"], 1)
+            self.assertFalse(any(r"\[ 与 \]" in issue for issue in report["issues"]))
+
+    def test_odd_backslash_run_still_starts_display_math(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            main = Path(temporary) / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}
+\\\[a=1\]
+\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            report = inspect_paper(main)
+
+            self.assertEqual(report["metrics"]["equations"], 1)
+            self.assertFalse(any(r"\[ 与 \]" in issue for issue in report["issues"]))
 
     def test_quality_thresholds_require_valid_values_and_override_reason(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -526,6 +565,140 @@ $$c=3$$
                 stale = inspect_paper(main, pdf_path=pdf)
             self.assertTrue(any("源码哈希" in issue for issue in stale["issues"]))
 
+    def test_cumcm_page_limit_counts_body_without_abstract_or_appendix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            root = parent / "project"
+            root.mkdir()
+            main = root / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}
+\begin{abstract}摘要\keywords{测试}\end{abstract}
+\section{正文}正文
+\appendix
+\section{支撑材料与代码清单}代码
+\end{document}
+""",
+                encoding="utf-8",
+            )
+            pdf = parent / "完整论文.pdf"
+            pdf.write_bytes(b"bound pdf")
+            pdf.with_suffix(".build.json").write_text(
+                json.dumps({
+                    "passed": True,
+                    "main_tex": "main.tex",
+                    "source_sha256": source_bundle_sha256(main),
+                    "pdf_sha256": hashlib.sha256(pdf.read_bytes()).hexdigest(),
+                }),
+                encoding="utf-8",
+            )
+            audit = {
+                "pages": 35,
+                "blank_pages": [],
+                "page_sizes_pt": [[595.3, 841.9]],
+                "unembedded_fonts": [],
+                "raster_images": 0,
+                "min_image_dpi": None,
+                "_page_texts": [
+                    "摘要",
+                    *(f"正文第{number}页" for number in range(1, 31)),
+                    "支撑材料与代码清单",
+                    "程序代码",
+                    "程序代码",
+                    "程序代码",
+                ],
+                "issues": [],
+            }
+
+            with patch("latex_paper._audit_pdf", return_value=audit):
+                report = inspect_paper(main, pdf_path=pdf, max_pages=30)
+
+            self.assertEqual(report["body_pages"], 30)
+            self.assertFalse(any("超过官方上限" in issue for issue in report["issues"]))
+
+    def test_appendix_page_argument_requires_appendix_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            main = Path(temporary) / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}\begin{abstract}摘要\keywords{测试}\end{abstract}
+\section{正文}正文
+\end{document}
+""",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, r"\\appendix"):
+                inspect_paper(main, appendix_start_page=2)
+
+    def test_non_cumcm_page_limit_uses_total_pdf_pages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            root = parent / "project"
+            root.mkdir()
+            main = root / "main.tex"
+            main.write_text(
+                r"""
+\documentclass{article}\newcommand{\keywords}[1]{#1}
+\begin{document}
+\begin{abstract}Summary\keywords{test}\end{abstract}
+\section{Body}Body
+\appendix
+\section{Appendix code}Code
+\end{document}
+""",
+                encoding="utf-8",
+            )
+            pdf = parent / "paper.pdf"
+            pdf.write_bytes(b"bound pdf")
+            pdf.with_suffix(".build.json").write_text(
+                json.dumps({
+                    "passed": True,
+                    "main_tex": "main.tex",
+                    "source_sha256": source_bundle_sha256(main),
+                    "pdf_sha256": hashlib.sha256(pdf.read_bytes()).hexdigest(),
+                }),
+                encoding="utf-8",
+            )
+            audit = {
+                "pages": 35,
+                "blank_pages": [],
+                "page_sizes_pt": [[595.3, 841.9]],
+                "unembedded_fonts": [],
+                "raster_images": 0,
+                "min_image_dpi": None,
+                "_page_texts": [
+                    "Summary",
+                    *(f"Body page {number}" for number in range(2, 31)),
+                    "Appendix code",
+                    "Code",
+                    "Code",
+                    "Code",
+                    "Code",
+                ],
+                "issues": [],
+            }
+
+            for contest in ("mcm-icm", "generic"):
+                with self.subTest(contest=contest), patch(
+                    "latex_paper._audit_pdf",
+                    return_value={**audit, "_page_texts": list(audit["_page_texts"])},
+                ):
+                    report = inspect_paper(
+                        main,
+                        contest=contest,
+                        pdf_path=pdf,
+                        max_pages=30,
+                    )
+
+                self.assertTrue(
+                    any("PDF 总页数 35" in issue for issue in report["issues"]),
+                    report["issues"],
+                )
+
     def test_pdf_audit_detects_blank_pages_and_page_size_changes(self):
         from pypdf import PdfWriter
 
@@ -572,6 +745,165 @@ $$c=3$$
 
         self.assertTrue(report["passed"])
         self.assertEqual(report["tools"]["latexmk"]["path"], "latexmk")
+
+    def test_unusable_latexmk_falls_back_to_engine_without_bibliography(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            main = Path(temporary) / "main.tex"
+            main.write_text(
+                r"\documentclass{article}\begin{document}ok\end{document}",
+                encoding="utf-8",
+            )
+            commands = []
+
+            def fake_run(command, **kwargs):
+                commands.append(command)
+                build = Path(kwargs["cwd"]) / "build"
+                (build / "main.pdf").write_bytes(b"pdf")
+                (build / "main.log").write_text("clean build", encoding="utf-8")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch(
+                "latex_paper.shutil.which",
+                side_effect=lambda name: name if name in {"latexmk", "xelatex"} else None,
+            ), patch(
+                "latex_paper._tool_version",
+                side_effect=lambda path: None if path == "latexmk" else "test version",
+            ), patch("latex_paper.subprocess.run", side_effect=fake_run):
+                report = build_paper(main)
+
+            self.assertTrue(report["passed"], report["issues"])
+            self.assertEqual([command[0] for command in commands], ["xelatex", "xelatex"])
+
+    def test_bound_resource_drift_blocks_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project_root = Path(temporary)
+            latex_root = project_root / "完整论文-LaTeX"
+            result = prepare_project(latex_root, contest="cumcm")
+            main = Path(result["main_tex"])
+            source = project_root / "figures"
+            source.mkdir()
+            (source / "result_q1.png").write_bytes(b"version 1")
+            destination = latex_root / "figs"
+            destination.mkdir()
+            (destination / "result_q1.png").write_bytes(b"version 1")
+
+            try:
+                latex_paper.bind_resource(main, source, "figs")
+            except AttributeError as error:
+                self.fail(f"缺少 LaTeX 资源绑定功能：{error}")
+
+            (source / "result_q1.png").write_bytes(b"version 2")
+            report = inspect_paper(main)
+
+            self.assertTrue(any("资源副本已漂移" in issue for issue in report["issues"]))
+
+    def test_single_file_binding_allows_destination_rename(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project_root = Path(temporary)
+            latex_root = project_root / "完整论文-LaTeX"
+            result = prepare_project(latex_root, contest="cumcm")
+            source = project_root / "figures" / "result_q1.png"
+            source.parent.mkdir()
+            source.write_bytes(b"same image")
+            destination = latex_root / "figs" / "figure1.png"
+            destination.parent.mkdir()
+            destination.write_bytes(b"same image")
+
+            binding = latex_paper.bind_resource(
+                Path(result["main_tex"]), source, "figs/figure1.png"
+            )
+
+            self.assertTrue(binding["passed"])
+            self.assertEqual(binding["binding"]["hash_mode"], "content")
+
+    def test_binding_rejects_invalid_existing_entries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project_root = Path(temporary)
+            latex_root = project_root / "完整论文-LaTeX"
+            result = prepare_project(latex_root, contest="cumcm")
+            source = project_root / "figures" / "result_q1.png"
+            source.parent.mkdir()
+            source.write_bytes(b"same image")
+            destination = latex_root / "figs" / "result_q1.png"
+            destination.parent.mkdir()
+            destination.write_bytes(b"same image")
+            manifest_path = latex_root / "latex-project.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["resource_bindings"] = [1]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, r"resource_bindings\[0\].*对象"):
+                latex_paper.bind_resource(
+                    Path(result["main_tex"]), source, "figs/result_q1.png"
+                )
+
+    def test_legacy_manifest_requires_existing_resource_copies_to_be_bound(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project_root = Path(temporary)
+            latex_root = project_root / "完整论文-LaTeX"
+            result = prepare_project(latex_root, contest="cumcm")
+            manifest_path = latex_root / "latex-project.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest.pop("resource_bindings")
+            manifest.pop("template_resources", None)
+            manifest.pop("template_files", None)
+            manifest.pop("template_resource_files", None)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            (latex_root / "figs").mkdir()
+            (latex_root / "figs" / "result_q1.png").write_bytes(b"legacy copy")
+
+            report = inspect_paper(Path(result["main_tex"]))
+
+            self.assertTrue(any("资源副本未绑定：figs" in issue for issue in report["issues"]))
+
+    def test_unbound_resource_in_any_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            latex_root = Path(temporary) / "完整论文-LaTeX"
+            result = prepare_project(latex_root, contest="cumcm")
+            image = latex_root / "images" / "result_q1.png"
+            image.parent.mkdir()
+            image.write_bytes(b"unbound")
+
+            report = inspect_paper(Path(result["main_tex"]))
+
+            self.assertTrue(
+                any("资源副本未绑定：images/result_q1.png" in issue for issue in report["issues"]),
+                report["issues"],
+            )
+
+    def test_unbound_common_code_and_data_formats_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            latex_root = Path(temporary) / "完整论文-LaTeX"
+            result = prepare_project(latex_root, contest="cumcm")
+            resources = {
+                "code/model.ipynb": b"{}",
+                "code/solver.cpp": b"int main(){}",
+                "data/input.txt": b"1 2 3",
+            }
+            for relative, content in resources.items():
+                path = latex_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+
+            report = inspect_paper(Path(result["main_tex"]))
+            messages = "\n".join(report["issues"])
+
+            for relative in resources:
+                self.assertIn(f"资源副本未绑定：{relative}", messages)
+
+    def test_resource_binding_rejects_project_root_as_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project_root = Path(temporary)
+            latex_root = project_root / "完整论文-LaTeX"
+            result = prepare_project(latex_root, contest="cumcm")
+            (latex_root / "code").mkdir()
+
+            with self.assertRaisesRegex(ValueError, "PROJECT_ROOT 根目录"):
+                latex_paper.bind_resource(
+                    Path(result["main_tex"]),
+                    project_root,
+                    "code",
+                )
 
     def test_compilation_runs_in_isolated_copy_and_cannot_modify_original(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -48,6 +48,35 @@ class PlotStyleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "PROJECT_ROOT"):
             plot_style.resolve_output_stem(plot_style.SKILL_ROOT / "figures" / "result_demo")
 
+    def test_copied_helper_allows_output_inside_project_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            copied = project / "utils" / "a" / "b" / "plot_style.py"
+            copied.parent.mkdir(parents=True)
+            copied.write_bytes((SCRIPTS / "plot_style.py").read_bytes())
+            spec = importlib.util.spec_from_file_location("copied_plot_style", copied)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            try:
+                resolved = module.resolve_output_stem(project / "figures" / "result_q1")
+            except ValueError as error:
+                self.fail(f"复制到 PROJECT_ROOT 后不应误判为 SKILL_ROOT：{error}")
+
+            self.assertEqual(resolved, (project / "figures" / "result_q1").resolve())
+
+    def test_copied_helper_still_refuses_the_real_skill_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "project" / "utils" / "a" / "b" / "plot_style.py"
+            copied.parent.mkdir(parents=True)
+            copied.write_bytes((SCRIPTS / "plot_style.py").read_bytes())
+            spec = importlib.util.spec_from_file_location("guarded_copied_plot_style", copied)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            with self.assertRaisesRegex(ValueError, "PROJECT_ROOT"):
+                module.resolve_output_stem(SCRIPTS / "forbidden")
+
     @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "需要 matplotlib")
     def test_real_export_passes_file_audit(self):
         import matplotlib

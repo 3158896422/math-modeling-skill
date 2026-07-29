@@ -10,7 +10,31 @@ from typing import Iterable, Sequence
 import unicodedata
 
 
-SKILL_ROOT = Path(__file__).resolve().parents[4]
+def _is_math_modeling_skill_root(path: Path) -> bool:
+    return (
+        (path / "SKILL.md").is_file()
+        and (path / "VERSION").is_file()
+        and (
+            path
+            / "references"
+            / "roles"
+            / "编程手"
+            / "scripts"
+            / "plot_style.py"
+        ).is_file()
+    )
+
+
+def _find_skill_root(path: Path) -> Path | None:
+    directory = path.resolve().parent
+    return next(
+        (candidate for candidate in (directory, *directory.parents)
+         if _is_math_modeling_skill_root(candidate)),
+        None,
+    )
+
+
+SKILL_ROOT = _find_skill_root(Path(__file__))
 
 # 以色觉可达性为先，颜色名称表达用途而不是绑定具体模型。
 PALETTE = {
@@ -362,11 +386,10 @@ def resolve_output_stem(output_stem: str | Path) -> Path:
     stem = Path(output_stem).expanduser().resolve()
     if stem.suffix.lower() in {".svg", ".png", ".pdf"}:
         stem = stem.with_suffix("")
-    try:
-        stem.relative_to(SKILL_ROOT)
-    except ValueError:
-        pass
-    else:
+    if any(
+        _is_math_modeling_skill_root(candidate)
+        for candidate in (stem.parent, *stem.parent.parents)
+    ):
         raise ValueError("图形产物必须写入 PROJECT_ROOT，不能写入 SKILL_ROOT")
     return stem
 

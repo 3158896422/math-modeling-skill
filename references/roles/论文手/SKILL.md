@@ -51,7 +51,7 @@ description: 根据题目、建模分析和真实代码结果生成内容一致�
 4. 按官方结构写完整正文，引用由双引擎搜索结果和原始出版页面核验。
 5. 默认先确定同一份正文、数据、图表和参考文献，再分别生成 Word 与 LaTeX，禁止两份论文出现不同结论。
 6. Word 使用 `../../../tools/docx/SKILL.md` 构建 DOCX，公式使用原生 OMML；已有完整 LaTeX 主稿时可通过 `convert_latex` 生成内容一致的 Word 初稿，再按官方 DOCX 模板修正。LaTeX 使用 `../../../tools/latex/SKILL.md` 复制完整官方模板项目、填充源码并真实编译 PDF。
-7. 分别检查两种格式的结构、篇幅、公式、图表、全部子问题覆盖、编号引用、参考文献和实际渲染页数。LaTeX 还必须消除编译错误及未解析的引用，核对源码—PDF 构建清单、字体嵌入、空白页、页面尺寸和图片 DPI；所有预警必须修正，或根据当届官方规则记录明确覆盖理由后才能继续。
+7. 分别检查两种格式的结构、篇幅、公式、图表、全部子问题覆盖、编号引用、参考文献和实际渲染页数。LaTeX 还必须消除编译错误及未解析的引用，核对权威资源—源码—PDF 哈希、PDF 总页数、正文页数、附录边界、字体嵌入、空白页、页面尺寸和图片 DPI；所有预警必须修正，或根据当届官方规则记录明确覆盖理由后才能继续。
 8. 完成下列确定性门禁后，派发独立质检 Subagent 执行 `W2` 论文终检；未返回 `PASS` 不得宣称完成或交付论文。
 
 ## 阶段内独立门禁
@@ -76,10 +76,10 @@ python "<SKILL_ROOT>/tools/docx/scripts/equations.py" verify-conversion "<PROJEC
 ```powershell
 python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" doctor --engine xelatex --bibliography-backend <none|bibtex|biber> --need-pandoc
 python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" build "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" --engine xelatex --publish "<PROJECT_ROOT>/完整论文.pdf"
-python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" validate "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" --pdf "<PROJECT_ROOT>/完整论文.pdf" --contest cumcm --quality-checks --questions q1 q2 q3 --min-image-dpi 300 --max-pages <当届官方上限>
+python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" validate "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" --pdf "<PROJECT_ROOT>/完整论文.pdf" --contest cumcm --quality-checks --questions q1 q2 q3 --min-image-dpi 300 --max-pages <当届官方正文上限> --body-start-page <正文起始页> --appendix-start-page <附录起始页>
 ```
 
-根据目标竞赛、实际子问题和官方模板替换 `contest`、`--questions`、引擎、参考文献后端及页数上限。构建警告默认阻断 `完整论文.pdf` 发布；只有已核对警告才能同时提供 `--allow-warning` 与 `--override-reason`。降低默认质量目标也必须通过 `--override-reason` 记录官方条款或用户要求。任一命令退出码非零即回到论文构建步骤修正；缺少运行环境即明确报告阻塞，不得交付未通过版本。最终回复必须报告篇幅、页数、公式数、图数、表数、子问题图覆盖、引用核验、源码/PDF 哈希绑定和全部命令退出码。
+根据目标竞赛、实际子问题和官方模板替换 `contest`、`--questions`、引擎、参考文献后端、正文起始页、附录起始页及正文页数上限；没有附录时省略 `--appendix-start-page`。复制权威代码或图表到 LaTeX 项目后，先按 LaTeX 工具说明执行 `bind`，再编译和校验。构建警告默认阻断 `完整论文.pdf` 发布；只有已核对警告才能同时提供 `--allow-warning` 与 `--override-reason`。降低默认质量目标也必须通过 `--override-reason` 记录官方条款或用户要求。任一命令退出码非零即回到论文构建步骤修正；缺少运行环境即明确报告阻塞，不得交付未通过版本。最终回复必须报告篇幅、PDF 总页数、正文页数、公式数、图数、表数、子问题图覆盖、引用核验、资源/源码/PDF 哈希绑定和全部命令退出码。
 
 上述命令只完成作者侧技术校验，不替代 `W2` 独立验收。
 
