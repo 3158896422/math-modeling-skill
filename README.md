@@ -327,6 +327,8 @@ python -m compileall -q tools references/roles/编程手/scripts
 
 [![GitHub Star 历史](imgs/star-history.svg)](https://github.com/XiaoMaColtAI/math-modeling-skill/stargazers)
 
+该图每日读取 GitHub 官方累计 Star 数自动更新；画布为 16:9，纵轴每 50 Star 一格，并在当前数值上方保留一个完整刻度。
+
 </div>
 
 ## 🙏 致谢
