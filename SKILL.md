@@ -69,12 +69,12 @@ description: 当用户要求数学建模、建模竞赛、建模分析、代码�
 
 ### 论文手
 
-默认同时交付两种格式，且正文内容、数据、图表和结论保持一致：
+默认交付 Word 论文；用户显式要求时才生成 LaTeX 论文。
 
 - Word：`完整论文.docx`；由 LaTeX 转换时同时保留哈希绑定的 `.conversion.json`。
-- LaTeX：`完整论文-LaTeX/` 源码项目、由其实际编译得到的 `完整论文.pdf` 和哈希绑定的 `.build.json`。
+- LaTeX（可选）：`完整论文-LaTeX/` 源码项目、由其实际编译得到的 `完整论文.pdf` 和哈希绑定的 `.build.json`。
 
-用户明确只要一种格式时，只生成指定格式。内部检查记录不作为额外交付物。
+用户明确要求 LaTeX 时，同时生成两种格式且正文内容、数据、图表和结论保持一致。内部检查记录不作为额外交付物。
 
 无论目标竞赛为何，论文默认至少包含 8 幅正式图；当届官方规则或用户明确要求与此冲突时，以其要求为准并记录依据。
 
@@ -103,6 +103,7 @@ description: 当用户要求数学建模、建模竞赛、建模分析、代码�
 | 搜索论文 | `tools/paper_search/SKILL.md` |
 | 读取题目 PDF | `tools/pdf/SKILL.md` |
 | 处理 Excel | `tools/xlsx/SKILL.md` |
+| 画图 | `tools/figure/SKILL.md` |
 | 生成 Word 论文 | `tools/docx/SKILL.md` |
 | 生成 LaTeX 论文 | `tools/latex/SKILL.md` |
 | LaTeX 论文转 Word | `tools/docx/SKILL.md` |

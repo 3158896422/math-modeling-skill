@@ -35,7 +35,7 @@ class SubagentProtocolTests(unittest.TestCase):
     def test_midstage_gates_precede_expensive_work(self):
         programming = read("references/roles/编程手/SKILL.md")
         writing = read("references/roles/论文手/SKILL.md")
-        self.assertLess(programming.index("执行 `P1`"), programming.index("绘图前完成数据剖析"))
+        self.assertLess(programming.index("执行 `P1`"), programming.index("绘图前加载"))
         self.assertLess(writing.index("执行 `W1`"), writing.index("按官方结构写完整正文"))
 
     def test_reviewers_are_read_only_and_evidence_based(self):

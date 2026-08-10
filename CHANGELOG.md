@@ -2,6 +2,24 @@
 
 当前公开版本从 `1.0.0` 重新建立版本基线。根目录 `VERSION` 是当前版本的唯一准据。
 
+## 1.2.0 - 2026-08-10
+
+### 科研可视化工具融合
+
+- 新增 `tools/figure/` 子 skill，融合 nature-figure 的图表契约/后端路由架构与 scipilot-figure-skill 的数据剖析/选图决策/自检闭环，支持 Python 和 R 双后端。
+- 新增 9 个可视化脚本：`profile_data.py`（数据剖析）、`setup_style.py`（期刊预设）、`export_figure.py`（多格式导出）、`visual_qa.py`（程序自检）、`layout_tools.py`（子图对齐）、`check_figure.py`（文件审计）、`validate_figure.py`（源码审计）、`nature_figure_backend.py`（后端路由）、`style_constants.py`（常量与工具函数）。
+- 新增 18 份参考文档并分为 5 个子文件夹：`chart-types/`（图表类型与选择）、`design/`（设计理论与避坑）、`api-templates/`（API 与模板）、`quality/`（质量检查与期刊规范）、`guides/`（教程与规范指南）。
+- 精简 `plot_style.py`：移除已被新工具替代的 `apply_publication_style`、`export_figure`、`audit_layout`、`audit_design` 函数，保留 `PALETTE`、`COLOR_SEQUENCE`、`WIDTHS_IN`、`choose_font`、`figure_size`、`publication_subplots`、`add_panel_labels`、`resolve_output_stem` 向后兼容。
+- 删除已迁移的文档：`可视化规范.md`、`图表选择与避坑.md`、`常见模式.md`；`可视化面板模板.html` 迁移到 `tools/figure/assets/`。
+- 可视化面板模板侧边栏导航改用 flexbox 布局，图表类型 badge 改为由 CSS `::after` 伪元素根据 `data-chart` 属性自动生成。
+- 更新编程手 SKILL.md、工作流程、质检清单、references/README.md、根 SKILL.md 和 README.md 中的可视化相关引用。
+
+### LaTeX 论文改为可选
+
+- 默认只生成 Word 论文（`完整论文.docx`），LaTeX 论文改为用户显式要求时才生成。
+- LaTeX 环境配置繁琐且不是所有用户都需要，将其从默认交付物中移除，降低使用门槛。
+- 更新论文手工作流程、自审框架、Subagent 调度和质检清单中的相关描述。
+
 ## 1.1.1 - 2026-07-29
 
 ### 绘图路径与 LaTeX 稳定性

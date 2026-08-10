@@ -4,7 +4,7 @@
 
 **面向数学建模竞赛与建模项目的三阶段工作流**
 
-[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](VERSION)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](VERSION)
 [![Agent Skill](https://img.shields.io/badge/Agent-Skill-4B8BBE.svg)](SKILL.md)
 
 **关注我**
@@ -21,7 +21,7 @@
 
 本 Skill 将数学建模任务拆分为 **建模分析 → 代码实现 → 论文撰写** 三个阶段。既可以按顺序完成整道题，也可以只执行其中一个阶段。
 
-当前版本：[`1.1.1`](VERSION)
+当前版本：[`1.2.0`](VERSION)
 
 > 生成的论文仅供参考。论文结构与格式必须以目标竞赛当届官方规则和官方模板为准。
 
@@ -33,7 +33,7 @@
 - 🎨 **出版级科学可视化**：先剖析数据和论证目标再选图，提供 Python/MATLAB 统一样式、色觉友好编码、SVG + 300 DPI PNG 导出与成图自检闭环。
 - 🔁 **可复现运行**：记录随机种子、输入文件 SHA-256、运行时与依赖版本、关键参数和唯一复现命令。
 - 🔎 **双引擎论文搜索**：并行调用 OpenAlex 与 AnySearch，按 DOI 或题名交叉核验。
-- 📄 **Word / LaTeX 论文生成**：支持官方模板、嵌套主入口、整篇 LaTeX→DOCX、Word 原生 OMML 公式、真实 PDF 编译、权威资源—源码—产物哈希绑定和完整质量门禁。
+- 📄 **Word / LaTeX 论文生成**：支持官方模板、嵌套主入口、整篇 LaTeX→DOCX、Word 原生 OMML 公式、真实 PDF 编译、权威资源—源码—产物哈希绑定和完整质量门禁。默认只生成 Word 论文，LaTeX 可选。
 - 🛡️ **阶段内独立质检**：默认只在建模终检、最小可运行结果、编程终检、论文证据大纲和论文终检节点派发只读 Subagent，发现问题立即返工复验。
 - 🤝 **可选 Subagent 协作**：用户可按需启用规则核验、附件盘点、文献与模型调研、算法原型、独立实验、双语言对照或术语核验；默认全部关闭。
 - 🧩 **渐进式加载**：只读取当前阶段需要的角色规范、算法资料和工具说明。
@@ -48,7 +48,7 @@
 |:---:|---|---|---|---|
 | ① | [建模手](references/roles/建模手/SKILL.md) | 理解题目、设计模型、定义算法和验证方案 | `M1` 建模终检 | `题目分析报告.md`、`术语表格.md` |
 | ② | [编程手](references/roles/编程手/SKILL.md) | 编写并运行 Python/MATLAB，生成结果与图 | `P1` 最小可运行结果、`P2` 编程终检 | 代码、结果表格、三类各至少 3 张且覆盖全部子问题的候选图、`results/复现清单.json` |
-| ③ | [论文手](references/roles/论文手/SKILL.md) | 基于真实结果构建论证并生成 Word 与 LaTeX 论文 | `W1` 证据大纲、`W2` 论文终检 | 至少 8 幅且覆盖全部子问题的正式图；默认同时交付 `完整论文.docx`、LaTeX 源码项目、PDF 与哈希清单 |
+| ③ | [论文手](references/roles/论文手/SKILL.md) | 基于真实结果构建论证并生成 Word 论文 | `W1` 证据大纲、`W2` 论文终检 | 至少 8 幅且覆盖全部子问题的正式图；默认交付 `完整论文.docx`；用户显式要求时同时交付 LaTeX 源码项目、PDF 与哈希清单 |
 
 质检 Subagent 是阶段内只读验收者，不是第四个固定角色。默认只启用固定质检；其他协作仅在用户明确选择后运行。`P1` 在全量计算和正式出图前执行，`W1` 在长篇正文和双格式排版前执行；禁止等全流程结束后才首次质检。完整协议见 [Subagent 调度与阶段门禁](references/Subagent调度.md)。
 
@@ -88,7 +88,8 @@ npx skills add https://github.com/xiaomacoltai/math-modeling-skill --skill math-
 完整流程：
 
 ```text
-使用数学建模 Skill 完成这道题，默认同时生成 Word 和 LaTeX/PDF 论文。
+使用数学建模 Skill 完成这道题，默认生成 Word 论文。
+使用数学建模 Skill 完成这道题，同时生成 Word 和 LaTeX 论文。
 使用官方 LaTeX 模板完成这道题，只交付完整 LaTeX 源码项目和编译 PDF。
 使用数学建模 Skill 完成这道题，额外启用附件盘点、文献调研和算法原型 Subagent。
 使用数学建模 Skill 完成这道题，除固定质检外不使用其他 Subagent。
@@ -100,7 +101,7 @@ npx skills add https://github.com/xiaomacoltai/math-modeling-skill --skill math-
 只做建模分析，输出题目分析报告和术语表格。
 只实现现有模型，使用 MATLAB 运行并生成全部结果和图。
 根据现有代码结果生成完整论文.docx。
-根据现有代码结果和官方模板生成 LaTeX 论文并实际编译。
+根据现有代码结果和官方模板生成 LaTeX 论文并实际编译（需显式要求）。
 ```
 
 主入口见 [SKILL.md](SKILL.md)。
@@ -129,20 +130,21 @@ PROJECT_ROOT/
 │   ├── raw_q2_* / process_q2_* / result_q2_*  # 其余问题依次覆盖
 │   └── _qa/                       # 自动生成的灰度质检预览
 ├── 完整论文.docx                 # 默认交付的 Word 论文
-├── 完整论文.conversion.json      # LaTeX→DOCX 输入/输出/模板哈希与警告记录
-├── 完整论文-LaTeX/               # 默认交付的 LaTeX 源码项目
+├── 完整论文.conversion.json      # LaTeX→DOCX 输入/输出/模板哈希与警告记录（LaTeX 可选时）
+├── 完整论文-LaTeX/               # LaTeX 源码项目（用户显式要求时）
 │   ├── main.tex
 │   ├── latex-project.json         # 模板来源、主入口及代码/图表资源绑定
 │   ├── references.bib
 │   └── 官方模板附带的 cls/sty/bst 等资源
-├── 完整论文.pdf                  # 由 LaTeX 源码实际编译
-└── 完整论文.build.json           # 源码/PDF 哈希、工具版本、命令与门禁结果
+├── 完整论文.pdf                  # 由 LaTeX 源码实际编译（用户显式要求时）
+└── 完整论文.build.json           # 源码/PDF 哈希、工具版本、命令与门禁结果（用户显式要求时）
 ```
 
 ## 🛠️ 集成工具
 
 | 工具 | 用途 |
 |---|---|
+| [科研可视化](tools/figure/SKILL.md) | 数据剖析、选图决策、Nature/SCI 出版级绘制、自检闭环、多格式导出 |
 | [双引擎论文搜索](tools/paper_search/SKILL.md) | OpenAlex + AnySearch 搜索、融合和交叉核验 |
 | [DOCX 工具](tools/docx/SKILL.md) | 官方模板、递归 LaTeX→DOCX、警告发布门禁、OMML 公式、三线表、修订、批注和校验 |
 | [LaTeX 工具](tools/latex/SKILL.md) | 环境诊断、官方模板溯源、真实编译、哈希绑定、引用与 PDF 质量校验 |
@@ -196,7 +198,7 @@ report = check_matlab_env(["data", "visualization", "optimization"]);
 
 ## 📄 论文生成
 
-默认同时运行两个模板驱动分支，生成内容一致的 Word 与 LaTeX/PDF 论文；用户明确只要一种格式时只运行指定分支。当届官方提交要求仍决定实际可提交的版本。
+默认只生成 Word 论文；用户显式要求时同时生成 LaTeX/PDF 论文。当届官方提交要求仍决定实际可提交的版本。
 
 Word：
 
@@ -212,7 +214,7 @@ Word：
 
 已有完整 LaTeX 主稿时，可使用 Pandoc 将整篇 `.tex` 及其 `\input`/`\include` 子文件转为 DOCX，公式保留为原生 OMML，并通过 `--template` 套用官方 Word 参考模板。Pandoc 警告默认阻断 DOCX 发布；转换成功会生成输入、输出、模板哈希和复现命令清单，交付前用 `verify-conversion` 重新计算全部哈希，随后仍须完成 DOCX 结构与渲染检查。
 
-LaTeX：
+LaTeX（用户显式要求时）：
 
 ```text
 当届官方 LaTeX 模板项目
@@ -227,7 +229,7 @@ LaTeX：
   → 打开 PDF 进行版面抽检
 ```
 
-没有官方 LaTeX 模板时才使用内置中英文构建基线。LaTeX 分支交付完整源码项目、实际编译 PDF 和哈希绑定构建清单，不只交一个缺少模板依赖的 `.tex` 文件。安全编译链不启用 shell escape，因此论文直接引用同源导出的 PDF、PNG 或 JPG，不在编译期转换 SVG/EPS。两种格式必须使用相同的数据、图表、公式、参考文献和结论，并分别通过质量校验。
+没有官方 LaTeX 模板时才使用内置中英文构建基线。LaTeX 分支交付完整源码项目、实际编译 PDF 和哈希绑定构建清单，不只交一个缺少模板依赖的 `.tex` 文件。安全编译链不启用 shell escape，因此论文直接引用同源导出的 PDF、PNG 或 JPG，不在编译期转换 SVG/EPS。同时生成两种格式时必须使用相同的数据、图表、公式、参考文献和结论，并分别通过质量校验。
 
 CUMCM 默认以约 15000 字词单位、约 20 页作为完整度质量目标，但这不是官方最低要求。以 2026 年官方规范为例，摘要原则上不超过一页、正文不超过 30 页，附录不计入正文上限；校验器会按正文起始页和附录起始页单独计算正文页数，不再用 PDF 总页数代替。实际交付必须重新核对目标届次的官方文件。所有竞赛采用相同的至少 8 幅正式图质量基线，并要求每个子问题至少有一幅正式结果图；校验器还会检查公式、非空图表、题注与正文引用、参考文献双向对应和 PDF 完整性。降低默认目标必须记录官方条款或用户要求。
 
@@ -309,9 +311,9 @@ python -m compileall -q tools references/roles/编程手/scripts
 
 ## 📋 版本与更新日志
 
-当前版本：[`1.1.1`](VERSION)
+当前版本：[`1.2.0`](VERSION)
 
-`1.1.1` 修复复制后绘图工具误判 `SKILL_ROOT`、CUMCM 正文页数误计摘要与附录、LaTeX 换行间距误判公式和不可执行 `latexmk` 不回退的问题，并新增项目权威代码/图表与 LaTeX 资源副本的哈希漂移门禁。详细内容见 [CHANGELOG.md](CHANGELOG.md)。
+`1.2.0` 新增科研可视化工具融合，将 LaTeX 论文改为可选（默认只生成 Word），并重组可视化参考文档。详细内容见 [CHANGELOG.md](CHANGELOG.md)。
 
 采用语义化版本 `MAJOR.MINOR.PATCH`：
 

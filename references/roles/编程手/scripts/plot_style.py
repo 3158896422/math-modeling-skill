@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
-"""数学建模论文图的统一样式与导出工具。"""
+"""数学建模论文图的统一样式工具（向后兼容层）。
+
+本文件保留原有 API 以兼容 ``from utils.plot_style import ...`` 的外部代码。
+实际常量和工具函数已迁移到 tools/figure/scripts/style_constants.py。
+布局审计和导出功能由 tools/figure/scripts/visual_qa.py 和
+tools/figure/scripts/export_figure.py 替代。
+"""
 
 from __future__ import annotations
 
-import warnings
 import logging
-from pathlib import Path
-from typing import Iterable, Sequence
 import unicodedata
+import warnings
+from pathlib import Path
+from typing import Sequence
 
+
+# ---------------------------------------------------------------------------
+# SKILL_ROOT 定位
+# ---------------------------------------------------------------------------
 
 def _is_math_modeling_skill_root(path: Path) -> bool:
     return (
@@ -36,7 +46,10 @@ def _find_skill_root(path: Path) -> Path | None:
 
 SKILL_ROOT = _find_skill_root(Path(__file__))
 
-# 以色觉可达性为先，颜色名称表达用途而不是绑定具体模型。
+# ---------------------------------------------------------------------------
+# 色盲安全配色
+# ---------------------------------------------------------------------------
+
 PALETTE = {
     "primary": "#0072B2",
     "secondary": "#E69F00",
@@ -58,11 +71,19 @@ COLOR_SEQUENCE = tuple(PALETTE[name] for name in (
     "neutral",
 ))
 
+# ---------------------------------------------------------------------------
+# 论文栏宽（英寸）
+# ---------------------------------------------------------------------------
+
 WIDTHS_IN = {
     "single": 3.5,
     "double": 7.2,
     "report": 6.3,
 }
+
+# ---------------------------------------------------------------------------
+# 字体选择
+# ---------------------------------------------------------------------------
 
 _CJK_SANS = (
     "Noto Sans CJK SC",
@@ -75,13 +96,11 @@ _CJK_SANS = (
 
 def _available_fonts() -> set[str]:
     from matplotlib import font_manager
-
     return {item.name for item in font_manager.fontManager.ttflist}
 
 
 def choose_font(language: str = "zh") -> str:
     """选择可用字体；中文字体缺失时给出警告并安全回退。"""
-
     if language not in {"zh", "en"}:
         raise ValueError("language 只能是 'zh' 或 'en'")
     available = _available_fonts()
@@ -100,9 +119,12 @@ def choose_font(language: str = "zh") -> str:
     return "DejaVu Sans"
 
 
+# ---------------------------------------------------------------------------
+# 尺寸计算
+# ---------------------------------------------------------------------------
+
 def figure_size(width: str = "report", aspect: float = 0.62) -> tuple[float, float]:
     """按最终使用宽度返回英寸尺寸，避免在论文中二次大幅缩放。"""
-
     if width not in WIDTHS_IN:
         raise ValueError(f"未知宽度方案: {width}")
     if aspect <= 0:
@@ -111,9 +133,103 @@ def figure_size(width: str = "report", aspect: float = 0.62) -> tuple[float, flo
     return width_in, width_in * aspect
 
 
-def apply_publication_style(language: str = "zh", width: str = "report") -> dict:
-    """应用适合数学建模论文的克制型 Nature/SCI 出版样式基线。"""
+# ---------------------------------------------------------------------------
+# 子图创建
+# ---------------------------------------------------------------------------
 
+def publication_subplots(
+    nrows: int = 1,
+    ncols: int = 1,
+    *,
+    width: str = "report",
+    aspect: float = 0.62,
+    width_ratios: Sequence[float] | None = None,
+    height_ratios: Sequence[float] | None = None,
+    squeeze: bool = True,
+):
+    """按最终尺寸创建子图，并允许显式声明主次面板比例。"""
+    import matplotlib.pyplot as plt
+
+    if nrows < 1 or ncols < 1:
+        raise ValueError("nrows 和 ncols 必须大于 0")
+    if width_ratios is not None and len(width_ratios) != ncols:
+        raise ValueError("width_ratios 数量必须与 ncols 一致")
+    if height_ratios is not None and len(height_ratios) != nrows:
+        raise ValueError("height_ratios 数量必须与 nrows 一致")
+    gridspec_kw = {}
+    if width_ratios is not None:
+        gridspec_kw["width_ratios"] = list(width_ratios)
+    if height_ratios is not None:
+        gridspec_kw["height_ratios"] = list(height_ratios)
+    return plt.subplots(
+        nrows,
+        ncols,
+        figsize=figure_size(width, aspect),
+        layout="constrained",
+        gridspec_kw=gridspec_kw or None,
+        squeeze=squeeze,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 面板标签
+# ---------------------------------------------------------------------------
+
+from collections.abc import Iterable as _Iterable
+
+
+def add_panel_labels(
+    axes: _Iterable,
+    labels: Sequence[str] | None = None,
+    *,
+    x_offset_pt: float = -8.0,
+    y_offset_pt: float = 1.0,
+) -> None:
+    """在各面板左上外侧添加小写粗体编号。"""
+    axes_list = list(axes)
+    panel_labels = list(labels) if labels is not None else [chr(97 + i) for i in range(len(axes_list))]
+    if len(panel_labels) != len(axes_list):
+        raise ValueError("labels 数量必须与 axes 数量一致")
+    for axis, label in zip(axes_list, panel_labels):
+        axis.annotate(
+            label,
+            xy=(0, 1),
+            xycoords="axes fraction",
+            xytext=(x_offset_pt, y_offset_pt),
+            textcoords="offset points",
+            ha="right",
+            va="bottom",
+            fontsize=8,
+            fontweight="bold",
+            annotation_clip=False,
+        )
+
+
+# ---------------------------------------------------------------------------
+# 路径安全
+# ---------------------------------------------------------------------------
+
+def resolve_output_stem(output_stem: str | Path) -> Path:
+    """解析导出路径，并禁止把任务产物写回 Skill 目录。"""
+    stem = Path(output_stem).expanduser().resolve()
+    if stem.suffix.lower() in {".svg", ".png", ".pdf"}:
+        stem = stem.with_suffix("")
+    if any(
+        _is_math_modeling_skill_root(candidate)
+        for candidate in (stem.parent, *stem.parent.parents)
+    ):
+        raise ValueError("图形产物必须写入 PROJECT_ROOT，不能写入 SKILL_ROOT")
+    return stem
+
+
+# ---------------------------------------------------------------------------
+# 向后兼容：已被 tools/figure/ 新工具替代的函数
+# 以下函数保留以兼容现有测试和外部代码。新代码请使用
+# tools/figure/scripts/ 下的 setup_style、visual_qa、export_figure。
+# ---------------------------------------------------------------------------
+
+def apply_publication_style(language: str = "zh", width: str = "report") -> dict:
+    """应用出版样式基线（向后兼容）。新代码请用 setup_style()。"""
     import matplotlib as mpl
     from cycler import cycler
 
@@ -160,69 +276,6 @@ def apply_publication_style(language: str = "zh", width: str = "report") -> dict
     return {"font": font_name, "size_inches": size, "colors": COLOR_SEQUENCE}
 
 
-def publication_subplots(
-    nrows: int = 1,
-    ncols: int = 1,
-    *,
-    width: str = "report",
-    aspect: float = 0.62,
-    width_ratios: Sequence[float] | None = None,
-    height_ratios: Sequence[float] | None = None,
-    squeeze: bool = True,
-):
-    """按最终尺寸创建子图，并允许显式声明主次面板比例。"""
-
-    import matplotlib.pyplot as plt
-
-    if nrows < 1 or ncols < 1:
-        raise ValueError("nrows 和 ncols 必须大于 0")
-    if width_ratios is not None and len(width_ratios) != ncols:
-        raise ValueError("width_ratios 数量必须与 ncols 一致")
-    if height_ratios is not None and len(height_ratios) != nrows:
-        raise ValueError("height_ratios 数量必须与 nrows 一致")
-    gridspec_kw = {}
-    if width_ratios is not None:
-        gridspec_kw["width_ratios"] = list(width_ratios)
-    if height_ratios is not None:
-        gridspec_kw["height_ratios"] = list(height_ratios)
-    return plt.subplots(
-        nrows,
-        ncols,
-        figsize=figure_size(width, aspect),
-        layout="constrained",
-        gridspec_kw=gridspec_kw or None,
-        squeeze=squeeze,
-    )
-
-
-def add_panel_labels(
-    axes: Iterable,
-    labels: Sequence[str] | None = None,
-    *,
-    x_offset_pt: float = -8.0,
-    y_offset_pt: float = 1.0,
-) -> None:
-    """在各面板左上外侧添加小写粗体编号。"""
-
-    axes_list = list(axes)
-    panel_labels = list(labels) if labels is not None else [chr(97 + i) for i in range(len(axes_list))]
-    if len(panel_labels) != len(axes_list):
-        raise ValueError("labels 数量必须与 axes 数量一致")
-    for axis, label in zip(axes_list, panel_labels):
-        axis.annotate(
-            label,
-            xy=(0, 1),
-            xycoords="axes fraction",
-            xytext=(x_offset_pt, y_offset_pt),
-            textcoords="offset points",
-            ha="right",
-            va="bottom",
-            fontsize=8,
-            fontweight="bold",
-            annotation_clip=False,
-        )
-
-
 class _GlyphHandler(logging.Handler):
     def __init__(self) -> None:
         super().__init__()
@@ -247,8 +300,7 @@ def _labels_overlap(labels, renderer, axis: str) -> bool:
 
 
 def audit_layout(fig) -> list[str]:
-    """在导出前检查缺字、画布外文字和相邻刻度重叠。"""
-
+    """在导出前检查缺字、画布外文字和相邻刻度重叠（向后兼容）。"""
     import matplotlib.text as mtext
 
     handler = _GlyphHandler()
@@ -303,8 +355,7 @@ def _is_colorbar_axis(axis) -> bool:
 
 
 def audit_design(fig) -> list[str]:
-    """检查可由对象结构确定的高风险设计，避免“文件合格、图却不好看”。"""
-
+    """检查可由对象结构确定的高风险设计（向后兼容）。"""
     from matplotlib.container import BarContainer
 
     issues: list[str] = []
@@ -380,20 +431,6 @@ def audit_design(fig) -> list[str]:
     return issues
 
 
-def resolve_output_stem(output_stem: str | Path) -> Path:
-    """解析导出路径，并禁止把任务产物写回 Skill 目录。"""
-
-    stem = Path(output_stem).expanduser().resolve()
-    if stem.suffix.lower() in {".svg", ".png", ".pdf"}:
-        stem = stem.with_suffix("")
-    if any(
-        _is_math_modeling_skill_root(candidate)
-        for candidate in (stem.parent, *stem.parent.parents)
-    ):
-        raise ValueError("图形产物必须写入 PROJECT_ROOT，不能写入 SKILL_ROOT")
-    return stem
-
-
 def _save_grayscale_preview(png_path: Path, dpi: int) -> Path:
     import matplotlib.image as image_io
     import numpy as np
@@ -419,8 +456,7 @@ def export_figure(
     strict_layout: bool = True,
     strict_design: bool = True,
 ) -> dict[str, str]:
-    """按固定物理尺寸导出，并执行布局与高风险设计门禁。"""
-
+    """按固定物理尺寸导出（向后兼容）。新代码请用 tools/figure/scripts/export_figure.py。"""
     if dpi < 300:
         raise ValueError("论文图 PNG 的 dpi 不能低于 300")
     layout_issues = audit_layout(fig)
@@ -433,7 +469,6 @@ def export_figure(
     stem.parent.mkdir(parents=True, exist_ok=True)
     svg_path = stem.with_suffix(".svg")
     png_path = stem.with_suffix(".png")
-    # 不使用 bbox_inches='tight'，否则会改变图表契约中的最终物理尺寸。
     fig.savefig(svg_path)
     fig.savefig(png_path, dpi=dpi)
     outputs = {"svg": str(svg_path), "png": str(png_path)}
@@ -446,6 +481,7 @@ __all__ = [
     "COLOR_SEQUENCE",
     "PALETTE",
     "WIDTHS_IN",
+    "SKILL_ROOT",
     "add_panel_labels",
     "apply_publication_style",
     "audit_design",
