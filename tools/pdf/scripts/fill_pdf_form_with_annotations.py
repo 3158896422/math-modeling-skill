@@ -8,26 +8,40 @@ from pypdf.annotations import FreeText
 
 
 def transform_from_image_coords(bbox, image_width, image_height, pdf_width, pdf_height):
+    """把图像坐标系（左上角原点）的边界框映射到 PDF 坐标系（左下角原点）。
+
+    输入 bbox 形如 (left, top, right, bottom)，来自图像坐标（y 向下增加）；
+    返回 (left, bottom, right, top)，供 pypdf 的 FreeText rect 使用。
+    """
     x_scale = pdf_width / image_width
     y_scale = pdf_height / image_height
 
     left = bbox[0] * x_scale
     right = bbox[2] * x_scale
 
-    top = pdf_height - (bbox[1] * y_scale)
-    bottom = pdf_height - (bbox[3] * y_scale)
+    # bbox[1] 是上边界（距顶），翻转后为 PDF 的 bottom；bbox[3] 是下边界，翻转后为 top
+    bottom = pdf_height - (bbox[1] * y_scale)
+    top = pdf_height - (bbox[3] * y_scale)
 
     return left, bottom, right, top
 
 
 def transform_from_pdf_coords(bbox, pdf_height):
+    """把 top-left 原点（y 向下增加）的 PDF 边界框转为 pypdf FreeText rect。
+
+    forms.md 约定：fields.json 使用 PDF 坐标，y=0 在页面顶部、y 向下增加，
+    即 bbox 形如 (left, top, right, bottom)。pypdf 的 rect 需要 bottom-left
+    原点（y 向上增加），因此 y 轴需要翻转：bottom = pdf_height - bbox[3]，
+    top = pdf_height - bbox[1]。
+    """
     left = bbox[0]
     right = bbox[2]
 
-    pypdf_top = pdf_height - bbox[1]      
-    pypdf_bottom = pdf_height - bbox[3]   
+    # bbox[1] 是上边界（距顶），翻转后为 rect 的 top；bbox[3] 是下边界，翻转后为 bottom
+    top = pdf_height - bbox[1]
+    bottom = pdf_height - bbox[3]
 
-    return left, pypdf_bottom, right, pypdf_top
+    return left, bottom, right, top
 
 
 def fill_pdf_form(input_pdf_path, fields_json_path, output_pdf_path):

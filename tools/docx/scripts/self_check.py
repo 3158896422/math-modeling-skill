@@ -13,9 +13,19 @@ from lxml import etree
 
 ROOT = Path(os.environ.get("MATH_MODELING_SKILL_ROOT", Path(__file__).resolve().parents[3]))
 SCRIPTS = ROOT / "tools" / "docx" / "scripts"
-TEMPLATE = ROOT / "references" / "roles" / "论文手" / "references" / "论文模板.docx"
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+
+
+def find_template() -> Path:
+    """定位官方论文模板；优先精确路径，回退到目录内首个 .docx，找不到则报错。"""
+    template_dir = ROOT / "references" / "roles" / "论文手" / "references"
+    preferred = template_dir / "论文模板.docx"
+    if preferred.exists():
+        return preferred
+    for candidate in sorted(template_dir.glob("*.docx")):
+        return candidate
+    raise FileNotFoundError(f"未找到论文模板：{template_dir}")
 
 
 def load(name):
@@ -90,8 +100,9 @@ def check_three_line_table():
 
 
 def check_template_validate():
+    template = find_template()
     result = subprocess.run(
-        [sys.executable, str(SCRIPTS / "office" / "validate.py"), str(TEMPLATE)],
+        [sys.executable, str(SCRIPTS / "office" / "validate.py"), str(template)],
         check=False,
     )
     assert result.returncode == 0
