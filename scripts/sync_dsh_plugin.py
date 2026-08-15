@@ -152,20 +152,27 @@ def main() -> None:
 
     dry_lines = []
 
-    # 1. 根 SKILL.md
+    # 1. 根 SKILL.md 与使用指南
     src_md = os.path.join(src, "SKILL.md")
     dst_md = os.path.join(dst, "SKILL.md")
+    src_guide = os.path.join(src, "使用指南.md")
+    dst_guide = os.path.join(dst, "使用指南.md")
     if os.path.isfile(src_md):
         mirror_tree(os.path.join(src, "references"), os.path.join(dst, "references"), args.apply, dry_lines)
         mirror_tree(os.path.join(src, "assets"), os.path.join(dst, "assets"), args.apply, dry_lines)
         sync_tools(os.path.join(src, "tools"), os.path.join(dst, "tools"), args.apply, dry_lines)
-        # 目标根目录只允许保留上述镜像目录与 SKILL.md，清理其余过期条目
-        clean_root_strays(dst, {"references", "assets", "tools", "SKILL.md"}, args.apply, dry_lines)
+        # 目标根目录只允许保留上述镜像目录与 SKILL.md/使用指南.md，清理其余过期条目
+        clean_root_strays(dst, {"references", "assets", "tools", "SKILL.md", "使用指南.md"}, args.apply, dry_lines)
         if need_sync(src_md, dst_md):
             dry_lines.append(f"  复制/更新: {os.path.relpath(dst_md, DEFAULT_DST)}")
             if args.apply:
                 os.makedirs(os.path.dirname(dst_md), exist_ok=True)
                 shutil.copy2(src_md, dst_md)
+        if need_sync(src_guide, dst_guide):
+            dry_lines.append(f"  复制/更新: {os.path.relpath(dst_guide, DEFAULT_DST)}")
+            if args.apply:
+                os.makedirs(os.path.dirname(dst_guide), exist_ok=True)
+                shutil.copy2(src_guide, dst_guide)
     if dry_lines:
         print("需要同步的文件：")
         for line in dry_lines:

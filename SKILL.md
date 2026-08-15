@@ -7,6 +7,20 @@ description: 当用户要求数学建模、建模竞赛、建模分析、代码�
 
 本 Skill 用三个独立角色完成数学建模。生成的论文仅供用户参考，不作为可直接提交的作品。论文结构与格式必须以目标竞赛当届官方规则和官方模板为准，不能用往届经验替代官方要求。
 
+**使用前**：请先阅读根目录 `使用指南.md`，明确本 Skill 的交付物使用边界，并把它复制到工作区（`PROJECT_ROOT`）：
+
+**PowerShell（Windows）：**
+```powershell
+Copy-Item "<SKILL_ROOT>\使用指南.md" "<PROJECT_ROOT>\使用指南.md"
+```
+
+**bash（macOS/Linux）：**
+```bash
+cp "<SKILL_ROOT>/使用指南.md" "<PROJECT_ROOT>/使用指南.md"
+```
+
+> `<SKILL_ROOT>` 是本 Skill 的安装目录（含 `SKILL.md` 的目录），`<PROJECT_ROOT>` 是你的题目/项目目录。
+
 ## 强制执行协议
 
 用户明确点名本 Skill 或任务命中本 Skill 时，严格执行以下协议；不要把它降级为建议：
