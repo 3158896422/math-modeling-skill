@@ -92,6 +92,7 @@ python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" validate "<PROJECT_ROOT
 | 生成 Word | `references/论文格式规范.md`、`../../../tools/docx/SKILL.md` |
 | 生成 LaTeX | `references/LaTeX格式规范.md`、`../../../tools/latex/SKILL.md` |
 | 中文写作检查 | `references/写作规范.md` |
+| 抓分检查（摘要/结论/图表） | `references/写作规范.md`（第二节 评阅人抓分方法论） |
 | 英文 MCM/ICM | `references/英文化工作流.md` |
 | 交付前 | `references/自审框架.md` |
 | 阶段内独立验收 | `../../../references/Subagent调度.md` |
