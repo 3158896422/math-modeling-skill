@@ -65,6 +65,16 @@
 
 本 Skill 可用于支持本地 Skills 或 Agent 工作流的工具，例如 Claude Code、Codex、Cursor、Trae 和 Qoder。具体加载方式以对应工具的当前文档为准。
 
+### DeepSeek Harness 插件
+
+本仓库同时提供 [DeepSeek Harness](https://deepseek-harness.github.io/deepseek-harness/)（dsh）的 **Agent 预设**：`dsh-plugin/math-modeling-agent/`，把三阶段工作流、五门禁质检、任务看板与完成判定封装为 `mm_*` 工具，供 dsh 桌面端使用。
+
+**安装**：把整个 `dsh-plugin/math-modeling-agent/` 目录复制到本机 dsh 预设根目录（`<dsh-home>\.agent-presets\`，Windows 默认 `C:\Users\<用户名>\AppData\Roaming\dsh-desktop\dsh-home\.agent-presets`），目录名即预设 id（如 `math-modeling`）。也可直接复制 `dsh-plugin/README.md` 中附带的安装提示词给 dsh Agent 自动完成安装。
+
+**使用**：新建 dsh 会话 → 选择预设「数学建模 Workbench」，即可使用 `mm_project_init` / `mm_phase_enter` / `mm_todo` / `mm_gate` / `mm_check_deliverables` / `mm_complete` / `mm_state` 等工具，并通过 `skill` 工具加载内置 math-modeling 知识库。
+
+> 插件为**自包含**设计：知识库随预设持久化，不依赖外部仓库路径，可整体复制到任意机器使用。
+
 ### 安装
 
 #### Git 克隆
@@ -296,6 +306,8 @@ math-modeling-skill/
 │       ├── 编程手/
 │       └── 论文手/
 ├── tools/                          # DOCX、LaTeX、PDF、XLSX、论文搜索
+├── dsh-plugin/                     # DeepSeek Harness 插件预设（独立分发）
+│   └── math-modeling-agent/        # Agent 预设：mm_* 工具 + 内置知识库
 └── tests/                          # 回归测试
 ```
 
