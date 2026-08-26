@@ -85,15 +85,15 @@ python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" validate "<PROJECT_ROOT
 
 ## CUMCM 最终提交门禁
 
-全国赛在 DOCX/LaTeX 渲染为完整 PDF 后，必须运行：
+全国赛在 DOCX/LaTeX 渲染为完整纸质版 PDF 后，必须运行：
 
 ```powershell
-python "<SKILL_ROOT>/tools/docx/scripts/cumcm_submission.py" validate-paper "<PROJECT_ROOT>/完整论文-纸质版.pdf" --mode paper --term "<真实姓名>" --term "<真实学校>"
-python "<SKILL_ROOT>/tools/docx/scripts/cumcm_submission.py" export-electronic "<PROJECT_ROOT>/完整论文-纸质版.pdf" "<PROJECT_ROOT>/完整论文.pdf" --overwrite
-python "<SKILL_ROOT>/tools/docx/scripts/cumcm_submission.py" package-support "<PROJECT_ROOT>/支撑材料.zip" "<PROJECT_ROOT>/code" "<PROJECT_ROOT>/results" --term "<真实学校>" --overwrite
+python "<SKILL_ROOT>/tools/docx/scripts/cumcm_submission.py" validate-paper "<PROJECT_ROOT>/完整论文-纸质版.pdf" --mode paper --term "<真实姓名>" --term "<真实学校>" --term "<真实赛区>"
+python "<SKILL_ROOT>/tools/docx/scripts/cumcm_submission.py" export-electronic "<PROJECT_ROOT>/完整论文-纸质版.pdf" "<PROJECT_ROOT>/完整论文.pdf" --term "<真实姓名>" --term "<真实学校>" --term "<真实赛区>" --overwrite
+python "<SKILL_ROOT>/tools/docx/scripts/cumcm_submission.py" package-support "<PROJECT_ROOT>/支撑材料.zip" "<PROJECT_ROOT>/code" "<PROJECT_ROOT>/results" --term "<真实姓名>" --term "<真实学校>" --term "<真实赛区>" --overwrite
 ```
 
-第一条检查第 1–3 页固定页面、正文边界和匿名词条；第二条删除前两页并复核电子版首页摘要、A4 和 20 MB；第三条生成 ZIP 支撑材料包内清单并复核大小和敏感词。扫描通过后仍要人工匿名复核；自动文本抽取失败时报告阻塞。
+第一条检查纸质版第 1–3 页固定页面、第 4 页正文起始、摘要≤1页、正文≤30页、摘要页起连续页码、A4 和匿名；第二条只有在纸质版通过后才删除前两页，并复核电子版首页摘要、A4、正文边界、匿名和 20 MB；第三条生成保留相对路径的 ZIP 文件清单，并扫描文件名、文本、DOCX/PDF/XLSX 成员的敏感信息和 20 MB 大小。若确实无支撑材料，允许不生成 ZIP，但附录必须明确注明“本论文没有支撑材料”。自动文本抽取或页码识别失败时报告阻塞，不能把人工未核验的文件声称为通过。
 
 ## 何时加载
 

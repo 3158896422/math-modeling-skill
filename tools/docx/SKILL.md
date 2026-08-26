@@ -129,14 +129,37 @@ python scripts/comment.py "<PROJECT_ROOT>/unpacked" 0 "批注意见"
 python scripts/comment.py "<PROJECT_ROOT>/unpacked" 1 "回复意见" --parent 0
 ```
 
+## CUMCM 纸质版与电子版提交
+
+2026 年全国大学生数学建模竞赛要求纸质版第 1 页为承诺书、第 2 页为编号专用页、第 3 页为摘要专用页、第 4 页起为正文，不要目录；摘要原则上不超过 1 页，正文不超过 30 页；摘要页起页脚用阿拉伯数字从 1 连续编号，附录在正文之后。电子版只保留一个 PDF 或 Word 文件且建议 PDF：必须删除承诺书和编号专用页，使摘要成为第 1 页，大小不超过 20 MB。支撑材料压缩为一个 RAR/ZIP，不超过 20 MB，并包含文件清单；所有论文正文、附录和支撑材料都不得出现姓名、学校、赛区、参赛编号等身份信息。
+
+全国赛生成时必须使用用户提供的当届官方模板。内置模板只是构建基线，不能声称符合官方提交规范；没有官方模板时报告 `BLOCKED` 并记录模板来源缺失。字号、字体和行距不由本工具冒充官方硬约束，沿用模板或作者设置即可。
+
+渲染完整 PDF 后，建议将纸质版 PDF 命名为 `完整论文-纸质版.pdf`，依次执行：
+
+```powershell
+python scripts/cumcm_submission.py validate-paper "<PROJECT_ROOT>/完整论文-纸质版.pdf" --mode paper --term "真实姓名" --term "真实学校" --term "真实赛区"
+python scripts/cumcm_submission.py export-electronic "<PROJECT_ROOT>/完整论文-纸质版.pdf" "<PROJECT_ROOT>/完整论文.pdf" --term "真实姓名" --term "真实学校" --term "真实赛区" --overwrite
+```
+
+`export-electronic` 会先拒绝未通过纸质版页面/匿名/页码检查的输入，再删除前两页，并复核电子版首页摘要、A4 尺寸、正文上限、匿名和 20 MB 限制。若 PDF 是扫描件或文本抽取无法确认页码/身份信息，报告为未通过并要求人工处理，不得把无法核验当作通过。
+
+打包支撑材料并生成包内清单（本工具生成 ZIP，已满足官方 RAR/ZIP 要求）：
+
+```powershell
+python scripts/cumcm_submission.py package-support "<PROJECT_ROOT>/支撑材料.zip" "<PROJECT_ROOT>/code" "<PROJECT_ROOT>/results" --term "真实姓名" --term "真实学校" --term "真实赛区" --overwrite
+```
+
+归档会保留输入目录的相对路径，扫描文本、DOCX、PDF、XLSX 等 OOXML 表格和 ZIP 内成员的文件名与内容；固定页文件名会被排除，身份命中或压缩包超过 20 MB 时返回非零退出码。确实没有支撑材料时可以不生成 ZIP，并在论文附录明确写出“本论文没有支撑材料”。自动扫描通过后仍须逐页、逐文件人工匿名复核。
+
 ## 必做验证
 
 ```powershell
 python scripts/check_env.py
 python scripts/self_check.py
 python scripts/office/validate.py "<PROJECT_ROOT>/完整论文.docx"
-python scripts/paper_format.py validate "<PROJECT_ROOT>/完整论文.docx" --contest cumcm --rendered-pages <DOCX实际渲染页数>
+python scripts/paper_format.py validate "<PROJECT_ROOT>/完整论文.docx" --contest cumcm --rendered-pages <DOCX实际总渲染页数> --body-pages <PDF正文页数>
 python scripts/equations.py verify-conversion "<PROJECT_ROOT>/完整论文.docx"
 ```
 
-`verify-conversion` 仅适用于由本工具的 Pandoc 转换生成、带 `.conversion.json` 的 DOCX；直接由 `paper_format.py` 构建时省略。`paper_format.py validate` 输出结构化指标，并在官方前置结构、篇幅质量目标、公式/图/表数量、图表编号与正文引用、参考文献双向对应或实际页数任一不满足时返回非零退出码。所有竞赛默认至少 8 幅图；CUMCM 默认的 15000 字词单位和约 20 页只是质量目标。以 2026 年官方规范为例，正文不超过 30 页才是硬约束。只有当届官方规则或用户明确要求允许偏离时才能调整目标并记录依据。结构校验后，把 DOCX 渲染成 PDF 或图片抽检分页、公式、表格、图片、页眉页脚和字体替换。
+`verify-conversion` 仅适用于由本工具的 Pandoc 转换生成、带 `.conversion.json` 的 DOCX；直接由 `paper_format.py` 构建时省略。`paper_format.py validate` 输出结构化指标，把篇幅、公式/图/表数量不足归为“预警”类质量目标；图表编号与正文引用、参考文献双向对应等完整性问题仍阻断交付。所有竞赛默认至少 8 幅图；CUMCM 默认的约 15000 字词单位、约 20 页、5 个公式、8 幅图和 3 个表都是可按题目调整的质量目标，不是官方最低数量。`--body-pages` 只接受正文页数，不能用完整 PDF 总页数代替；最终仍以 `cumcm_submission.py` 的固定页面、摘要/正文边界、匿名、电子版和支撑材料检查为准。以 2026 年官方规范为例，摘要原则上不超过 1 页、正文不超过 30 页才是硬约束。只有当届官方规则或用户明确要求允许偏离时才能调整目标并记录依据。结构校验后，把 DOCX 渲染成完整 PDF，再执行上节纸质版/电子版提交检查和人工版面抽检。

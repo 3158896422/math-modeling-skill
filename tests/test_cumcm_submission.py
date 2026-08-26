@@ -23,6 +23,8 @@ def _write_pdf(path, pages):
         page = doc.new_page(width=595.276, height=841.89)
         rect = fitz.Rect(72, 72, 523, 770)
         page.insert_htmlbox(rect, f"<p style='font-family: sans-serif;'>{text}</p>")
+        if len(doc) >= 3:
+            page.insert_text((295, 815), str(len(doc) - 2), fontsize=9, fontname='helv')
     doc.save(path)
     doc.close()
 
@@ -96,6 +98,40 @@ class CumcmSubmissionTests(unittest.TestCase):
             self.assertIn("支撑材料文件列表.txt", names)
             self.assertIn("code/main.py", manifest)
             self.assertFalse(any("承诺书" in name for name in names))
+
+    def test_english_word_name_in_code_is_not_a_false_positive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "code.py"
+            source.write_text("file_name = 'result.csv'\n", encoding="utf-8")
+            report = cs.scan_anonymity([source])
+            self.assertTrue(report["passed"], report["hits"])
+
+    def test_docx_member_is_scanned_inside_support_zip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code = root / "code"
+            code.mkdir()
+            from docx import Document
+            document = Document()
+            document.add_paragraph("来自某某大学")
+            document.save(code / "notes.docx")
+            package = root / "支撑材料.zip"
+            report = cs.package_support([code], package, terms=["某某大学"])
+            self.assertFalse(report["passed"])
+            self.assertTrue(any("某某大学" in hit["excerpt"] for hit in report["anonymity"]["hits"]))
+
+    def test_xlsx_member_is_scanned_without_openpyxl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "results.xlsx"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr(
+                    "xl/sharedStrings.xml",
+                    "<sst><si><t>某某大学</t></si></sst>",
+                )
+            report = cs.scan_anonymity([source], terms=["某某大学"])
+            self.assertFalse(report["passed"])
+            self.assertTrue(any("某某大学" in hit["excerpt"] for hit in report["hits"]))
 
     def test_custom_identity_term_is_detected_in_text(self):
         with tempfile.TemporaryDirectory() as tmp:

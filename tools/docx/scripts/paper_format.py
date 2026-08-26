@@ -402,6 +402,7 @@ def validate_paper_structure(
     min_figures=None,
     min_tables=None,
     rendered_pages=None,
+    body_pages=None,
     target_pages=None,
     official_max_pages=None,
     require_rendered_pages=True,
@@ -434,7 +435,12 @@ def validate_paper_structure(
         min_figures = 8 if min_figures is None else min_figures
         min_tables = 3 if min_tables is None else min_tables
         target_pages = 20 if target_pages is None else target_pages
-        official_max_pages = 30 if official_max_pages is None else official_max_pages
+        # CUMCM limits the body, not the complete rendered PDF.  The DOCX
+        # helper only receives a total page count unless the caller supplies
+        # body_pages; final fixed-page/appendix accounting belongs to
+        # cumcm_submission.py.
+        if official_max_pages is None and body_pages is not None:
+            official_max_pages = 30
     else:
         min_content_units = 0 if min_content_units is None else min_content_units
         min_equations = 0 if min_equations is None else min_equations
@@ -464,8 +470,8 @@ def validate_paper_structure(
 
     if rendered_pages is None and require_rendered_pages and target_pages is not None:
         errors.append(
-            f"预警：未提供渲染页数，无法检查约 {target_pages} 页质量目标和 "
-            f"{official_max_pages} 页官方上限"
+            f"预警：未提供渲染页数，无法检查约 {target_pages} 页质量目标；"
+            "CUMCM 正文页数上限需在 PDF 提交检查中核验"
         )
     elif rendered_pages is not None:
         if target_pages is not None and rendered_pages < target_pages:
@@ -473,9 +479,14 @@ def validate_paper_structure(
                 f"预警：渲染后共 {rendered_pages} 页，低于约 {target_pages} 页质量目标；"
                 "该目标不是官方最低页数"
             )
-        if official_max_pages is not None and rendered_pages > official_max_pages:
+        if contest.lower() == "cumcm" and body_pages is None:
             errors.append(
-                f"渲染后共 {rendered_pages} 页，超过当前核验的官方上限 {official_max_pages} 页"
+                "预警：未提供正文页数，不能用完整 PDF 总页数代替 CUMCM 的正文页数上限；"
+                "请在渲染 PDF 后运行 cumcm_submission.py"
+            )
+        elif official_max_pages is not None and body_pages > official_max_pages:
+            errors.append(
+                f"正文页数 {body_pages} 页，超过当前核验的官方上限 {official_max_pages} 页"
             )
     return errors
 
@@ -511,7 +522,7 @@ def save_document(doc, project_root, filename="完整论文.docx", contest="cumc
     return output
 
 
-def validate_document(path, *, contest="cumcm", rendered_pages=None):
+def validate_document(path, *, contest="cumcm", rendered_pages=None, body_pages=None):
     """校验现有 DOCX，并返回可供完成门禁使用的结构化结果。"""
     source = Path(path).resolve()
     if not source.is_file() or source.suffix.casefold() != ".docx":
@@ -522,6 +533,7 @@ def validate_document(path, *, contest="cumcm", rendered_pages=None):
         contest,
         quality_checks=True,
         rendered_pages=rendered_pages,
+        body_pages=body_pages,
         require_rendered_pages=True,
     )
     text = "\n".join(_document_texts(doc))
@@ -530,6 +542,7 @@ def validate_document(path, *, contest="cumcm", rendered_pages=None):
         "metrics": {
             "content_units": _content_units(text),
             "rendered_pages": rendered_pages,
+            "body_pages": body_pages,
             "equations": len(doc._element.findall(f".//{qn('m:oMath')}")),
             "figures": len(doc._element.findall(f".//{qn('a:blip')}")),
             "tables": len(doc.tables),
@@ -548,11 +561,13 @@ def main():
     validate.add_argument("path", type=Path)
     validate.add_argument("--contest", choices=sorted(CONTEST_PROFILES), default="cumcm")
     validate.add_argument("--rendered-pages", type=int, required=True)
+    validate.add_argument("--body-pages", type=int, default=None, help="渲染 PDF 中正文页数；CUMCM 不把总页数当正文页数")
     arguments = parser.parse_args()
     result = validate_document(
         arguments.path,
         contest=arguments.contest,
         rendered_pages=arguments.rendered_pages,
+        body_pages=arguments.body_pages,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["passed"] else 1

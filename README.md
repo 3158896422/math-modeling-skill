@@ -174,6 +174,17 @@ python tools/paper_search/scripts/hybrid_scholar.py \
 - AnySearch 需要密钥时设置环境变量 `ANYSEARCH_API_KEY`。
 - 正式检索默认同时运行两个引擎；单引擎参数只用于诊断。
 
+### 测试环境依赖
+
+运行完整 Python 测试套件前，安装仓库声明的测试补充依赖：
+
+```powershell
+python -m pip install -r requirements-test.txt
+python -m unittest discover -s tests -v
+```
+
+其中包含 DOCX 批注安全 XML 解析所需的 `defusedxml`，以及 Excel 读取/重算所需的 `openpyxl`。
+
 ### 动态依赖检查
 
 Python 只检查实际需要的功能：

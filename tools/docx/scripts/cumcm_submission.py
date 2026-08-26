@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""2026 CUMCM paper/electronic-submission checks and support packaging.
+"""CUMCM 2026 paper/electronic-submission checks and support packaging.
 
-This tool distinguishes official submission constraints from author-side quality
-warnings. It is intentionally conservative: automatic checks report evidence,
-not a guarantee that the official committee will accept a submission.
+The checker separates official submission constraints from author-side quality
+warnings.  It is deliberately conservative: a PASS is evidence that the
+machine-checkable rules were satisfied, not a guarantee of committee acceptance.
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import io
 import json
 import os
 import re
-import shutil
-import sys
-import tempfile
 import zipfile
 from pathlib import Path
 from typing import Iterable
@@ -24,50 +20,71 @@ MAX_FILE_SIZE = 20 * 1024 * 1024
 A4_WIDTH_PT = 595.276
 A4_HEIGHT_PT = 841.89
 PAGE_TOLERANCE_PT = 3.0
+
+# Do not include the bare English word ``name``: it occurs frequently in source
+# code and would make an anonymity scan unusably noisy.  Real names/schools/
+# regions must be supplied with --term.
 DEFAULT_TERMS = (
     "姓名", "学校", "赛区", "参赛编号", "参赛队", "队员", "指导教师", "学号",
-    "name", "university", "school", "region", "contestant", "team member",
-    "student id", "student_id", "team member",
+    "university", "school", "region", "contestant", "team member",
+    "student id", "student_id",
 )
 TOC_TERMS = ("目录", "table of contents", "contents")
 APPENDIX_TERMS = ("附录", "支撑材料", "appendix", "supporting material")
 COMMITMENT_TERMS = ("承诺书", "commitment")
-NUMBER_PAGE_TERMS = ("编号专用页", "编号", "special number")
+NUMBER_PAGE_TERMS = ("编号专用页", "special number")
+ABSTRACT_TERMS = ("摘 要", "摘要", "abstract")
+BODY_START_TERMS = (
+    "正文", "问题重述", "问题分析", "模型假设", "模型建立", "符号说明",
+    "problem restatement", "model assumptions", "model formulation",
+)
 TEXT_SUFFIXES = {
     ".txt", ".md", ".markdown", ".tex", ".bib", ".csv", ".json", ".yaml", ".yml",
     ".py", ".m", ".r", ".java", ".js", ".ts", ".xml", ".html", ".css", ".log",
 }
+DOCUMENT_SUFFIXES = {".docx", ".pdf"}
+SPREADSHEET_SUFFIXES = {".xlsx", ".xlsm", ".xltx", ".xltm"}
 
 
 def _norm(value: str) -> str:
-    return re.sub(r"\s+", " ", value).casefold()
+    return re.sub(r"\s+", " ", value).strip().casefold()
 
 
-def _read_text(path: Path) -> str:
-    suffix = path.suffix.casefold()
-    if suffix in TEXT_SUFFIXES:
-        return path.read_text(encoding="utf-8", errors="replace")
-    if suffix == ".docx":
-        try:
-            from docx import Document
-        except ImportError as exc:
-            raise RuntimeError("扫描 DOCX 需要 python-docx") from exc
-        doc = Document(path)
-        parts = [p.text for p in doc.paragraphs]
-        for table in doc.tables:
-            parts.extend(cell.text for row in table.rows for cell in row.cells)
-        return "\n".join(parts)
-    if suffix == ".pdf":
-        return "\n".join(_pdf_page_texts(path))
-    return ""
+def _term_is_ascii(term: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9][a-z0-9 _-]*", term.casefold()))
 
 
-def _pdf_page_texts(path: Path) -> list[str]:
+def _term_in_text(text: str, term: str) -> bool:
+    """Match Chinese terms by substring and English terms by word boundary."""
+    if not term:
+        return False
+    if _term_is_ascii(term):
+        pattern = rf"(?<![a-z0-9_]){re.escape(term)}(?![a-z0-9_])"
+        return re.search(pattern, text.casefold()) is not None
+    return term in text
+
+
+def _read_docx_bytes(data: bytes) -> str:
+    try:
+        from docx import Document
+    except ImportError as exc:
+        raise RuntimeError("扫描 DOCX 需要 python-docx") from exc
+    doc = Document(io.BytesIO(data))
+    parts = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        parts.extend(cell.text for row in table.rows for cell in row.cells)
+    for section in doc.sections:
+        parts.extend(p.text for p in section.header.paragraphs)
+        parts.extend(p.text for p in section.footer.paragraphs)
+    return "\n".join(parts)
+
+
+def _pdf_page_texts_from_bytes(data: bytes) -> list[str]:
     try:
         from pypdf import PdfReader
     except ImportError as exc:
         raise RuntimeError("处理 PDF 需要 pypdf") from exc
-    reader = PdfReader(path)
+    reader = PdfReader(io.BytesIO(data))
     result = []
     for page in reader.pages:
         try:
@@ -75,6 +92,37 @@ def _pdf_page_texts(path: Path) -> list[str]:
         except Exception:
             result.append("")
     return result
+
+
+def _read_spreadsheet_bytes(data: bytes) -> str:
+    """Extract XML text from OOXML spreadsheets without requiring openpyxl."""
+    parts = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            for info in archive.infolist():
+                if info.is_dir() or Path(info.filename).suffix.casefold() != ".xml":
+                    continue
+                parts.append(archive.read(info).decode("utf-8", errors="replace"))
+    except zipfile.BadZipFile as exc:
+        raise ValueError("无效的 OOXML 表格文件") from exc
+    return "\n".join(parts)
+
+
+def _read_bytes(path: Path) -> bytes:
+    return path.read_bytes()
+
+
+def _read_text(path: Path) -> str:
+    suffix = path.suffix.casefold()
+    if suffix in TEXT_SUFFIXES:
+        return _read_bytes(path).decode("utf-8", errors="replace")
+    if suffix == ".docx":
+        return _read_docx_bytes(_read_bytes(path))
+    if suffix == ".pdf":
+        return "\n".join(_pdf_page_texts_from_bytes(_read_bytes(path)))
+    if suffix in SPREADSHEET_SUFFIXES:
+        return _read_spreadsheet_bytes(_read_bytes(path))
+    return ""
 
 
 def _iter_files(paths: Iterable[Path]) -> Iterable[Path]:
@@ -88,30 +136,73 @@ def _iter_files(paths: Iterable[Path]) -> Iterable[Path]:
             yield from (item for item in path.rglob("*") if item.is_file())
 
 
+def _find_hits(label: str, text: str, needles: Iterable[str]) -> list[dict]:
+    result = []
+    lines = text.splitlines() or [text]
+    for line_no, line in enumerate(lines, 1):
+        haystack = _norm(line)
+        for term in needles:
+            if _term_in_text(haystack, term):
+                result.append({"path": label, "term": term, "line": line_no, "excerpt": line[:240]})
+    return result
+
+
+def _archive_member_text(name: str, data: bytes) -> str:
+    suffix = Path(name).suffix.casefold()
+    if suffix in TEXT_SUFFIXES:
+        return data.decode("utf-8", errors="replace")
+    if suffix == ".docx":
+        return _read_docx_bytes(data)
+    if suffix == ".pdf":
+        return "\n".join(_pdf_page_texts_from_bytes(data))
+    if suffix in SPREADSHEET_SUFFIXES:
+        return _read_spreadsheet_bytes(data)
+    return ""
+
+
+def _scan_zip(path: Path, needles: tuple[str, ...]) -> tuple[list[str], list[dict]]:
+    scanned: list[str] = []
+    hits: list[dict] = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for info in archive.infolist():
+                if info.is_dir():
+                    continue
+                label = f"{path}!{info.filename}"
+                # File names are part of the submitted material and must also
+                # be anonymous, even when the member is binary.
+                hits.extend(_find_hits(f"{label}!filename", info.filename, needles))
+                try:
+                    text = _archive_member_text(info.filename, archive.read(info))
+                except (OSError, RuntimeError, ValueError) as exc:
+                    hits.append({"path": label, "term": "<scan error>", "line": 0, "excerpt": str(exc)})
+                    continue
+                if text:
+                    scanned.append(label)
+                    hits.extend(_find_hits(label, text, needles))
+    except zipfile.BadZipFile:
+        hits.append({"path": str(path), "term": "<invalid zip>", "line": 0, "excerpt": ""})
+    return scanned, hits
+
+
 def scan_anonymity(paths: Iterable[Path], terms: Iterable[str] = ()) -> dict:
-    needles = tuple(dict.fromkeys(_norm(t) for t in (*DEFAULT_TERMS, *terms) if t.strip()))
-    hits = []
-    scanned = []
+    raw_terms = [str(t) for t in (*DEFAULT_TERMS, *terms) if str(t).strip()]
+    needles = tuple(dict.fromkeys(_norm(t) for t in raw_terms))
+    hits: list[dict] = []
+    scanned: list[str] = []
     for path in _iter_files(paths):
         if path.suffix.casefold() == ".zip":
-            try:
-                with zipfile.ZipFile(path) as archive:
-                    for info in archive.infolist():
-                        if info.is_dir():
-                            continue
-                        data = archive.read(info)
-                        text = data.decode("utf-8", errors="replace") if Path(info.filename).suffix.casefold() in TEXT_SUFFIXES else ""
-                        if text:
-                            scanned.append(f"{path}!{info.filename}")
-                            hits.extend(_find_hits(f"{path}!{info.filename}", text, needles))
-            except zipfile.BadZipFile:
-                hits.append({"path": str(path), "term": "<invalid zip>", "line": 0, "excerpt": ""})
+            zip_scanned, zip_hits = _scan_zip(path, needles)
+            scanned.extend(zip_scanned)
+            hits.extend(zip_hits)
             continue
         try:
             text = _read_text(path)
-        except (OSError, RuntimeError) as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             hits.append({"path": str(path), "term": "<scan error>", "line": 0, "excerpt": str(exc)})
             continue
+        # Binary files with identity-bearing filenames must still be caught.
+        hits.extend(_find_hits(f"{path}!filename", path.name, needles))
         if not text:
             continue
         scanned.append(str(path))
@@ -119,24 +210,36 @@ def scan_anonymity(paths: Iterable[Path], terms: Iterable[str] = ()) -> dict:
     return {"terms": list(needles), "scanned_files": scanned, "hits": hits, "passed": not hits}
 
 
-def _find_hits(label: str, text: str, needles: Iterable[str]) -> list[dict]:
-    result = []
-    lines = text.splitlines() or [text]
-    for line_no, line in enumerate(lines, 1):
-        haystack = _norm(line)
-        for term in needles:
-            if term and term in haystack:
-                result.append({"path": label, "term": term, "line": line_no, "excerpt": line[:240]})
-    return result
-
-
 def _page_marker(text: str, terms: Iterable[str]) -> bool:
     haystack = _norm(text)
-    return any(_norm(term) in haystack for term in terms)
+    return any(_term_in_text(haystack, _norm(term)) for term in terms)
+
+
+def _has_body_start_marker(text: str) -> bool:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines[:24]:
+        normalized = _norm(line)
+        if _page_marker(normalized, BODY_START_TERMS):
+            return True
+        if re.match(r"^(?:[一二三四五六七八九十]+\s*[、.]|第\s*\d+\s*[问、.]|\d+\s*[.、)])", normalized):
+            return True
+    return False
+
+
+def _extract_page_number(text: str) -> int | None:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in reversed(lines[-10:]):
+        match = re.fullmatch(r"(?:第\s*)?(\d{1,3})(?:\s*页)?", line)
+        if match:
+            return int(match.group(1))
+        match = re.search(r"(?:^|\s)(\d{1,3})(?:\s*页)?$", line)
+        if match:
+            return int(match.group(1))
+    return None
 
 
 def audit_page_texts(page_texts: list[str], *, mode: str = "paper", max_body_pages: int = 30) -> dict:
-    """Audit page order using extracted page text; returns issues/warnings/metrics."""
+    """Audit fixed pages, abstract/body boundary, appendix and page numbering."""
     issues: list[str] = []
     warnings: list[str] = []
     if mode not in {"paper", "electronic"}:
@@ -154,15 +257,29 @@ def audit_page_texts(page_texts: list[str], *, mode: str = "paper", max_body_pag
     else:
         if pages < 2:
             issues.append("电子版至少需要摘要页和正文起始页")
-        if pages >= 1 and not _page_marker(page_texts[0], ("摘 要", "摘要", "abstract")):
+        if pages >= 1 and not _page_marker(page_texts[0], ABSTRACT_TERMS):
             issues.append("电子版第 1 页未检测到摘要标识")
         abstract_page = 1
         body_start = 2
-    if pages >= abstract_page and not _page_marker(page_texts[abstract_page - 1], ("摘 要", "摘要", "abstract")):
+
+    if pages >= abstract_page and not _page_marker(page_texts[abstract_page - 1], ABSTRACT_TERMS):
         issues.append(f"第 {abstract_page} 页未检测到摘要标识")
+    if pages < body_start:
+        issues.append(f"未找到正文起始页（应为第 {body_start} 页）")
+    elif not _has_body_start_marker(page_texts[body_start - 1]):
+        issues.append(
+            f"第 {body_start} 页未检测到正文起始标识；无法确认摘要原则上不超过 1 页"
+        )
+    elif _page_marker(page_texts[body_start - 1], ("关键词：", "keywords:")):
+        issues.append(f"第 {body_start} 页仍包含摘要/关键词内容，摘要可能超过 1 页")
+
     if pages >= body_start and _page_marker(page_texts[body_start - 1], TOC_TERMS):
         issues.append("论文包含目录；2026 年全国赛规范要求不要目录")
-    appendix_candidates = [i + 1 for i, text in enumerate(page_texts) if _page_marker(text, APPENDIX_TERMS)]
+
+    appendix_candidates = [
+        i + 1 for i, text in enumerate(page_texts)
+        if _page_marker(text, APPENDIX_TERMS)
+    ]
     appendix_start = appendix_candidates[0] if appendix_candidates else None
     if appendix_start is not None and appendix_start < body_start:
         issues.append("附录出现在正文起始页之前")
@@ -170,26 +287,16 @@ def audit_page_texts(page_texts: list[str], *, mode: str = "paper", max_body_pag
     body_pages = max(0, body_end - body_start) if body_start <= body_end else 0
     if body_pages > max_body_pages:
         issues.append(f"正文页数 {body_pages}，超过官方上限 {max_body_pages} 页")
-    if pages >= abstract_page + 1 and _page_marker(page_texts[abstract_page], APPENDIX_TERMS):
-        issues.append("摘要页之后未检测到正文内容，无法确认正文起始页")
-    page_number_hits = []
-    for number, text in enumerate(page_texts, 1):
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        found = None
-        for line in reversed(lines[-6:]):
-            match = re.fullmatch(r"(?:第\s*)?(\d+)(?:\s*页)?", line)
-            if match:
-                found = int(match.group(1))
-                break
-        page_number_hits.append(found)
-    expected_first = 1 if mode == "electronic" else 1
-    numbered_pages = page_number_hits[abstract_page - 1:]
-    if numbered_pages and all(value is not None for value in numbered_pages):
-        expected = list(range(expected_first, expected_first + len(numbered_pages)))
+
+    page_numbers = [_extract_page_number(text) for text in page_texts]
+    numbered_pages = page_numbers[abstract_page - 1:]
+    if not numbered_pages or any(value is None for value in numbered_pages):
+        issues.append("无法确认摘要页起的连续页码；请确保页脚从 1 开始连续编号")
+    else:
+        expected = list(range(1, len(numbered_pages) + 1))
         if numbered_pages != expected:
             issues.append(f"摘要页起的页码不连续：检测到 {numbered_pages}，期望 {expected}")
-    else:
-        warnings.append("未能从 PDF 文本稳定识别摘要页起的连续页码；请人工检查页脚")
+
     return {
         "mode": mode,
         "pages": pages,
@@ -197,6 +304,7 @@ def audit_page_texts(page_texts: list[str], *, mode: str = "paper", max_body_pag
         "body_start_page": body_start,
         "appendix_start_page": appendix_start,
         "body_pages": body_pages,
+        "page_numbers": page_numbers,
         "issues": issues,
         "warnings": warnings,
         "passed": not issues,
@@ -209,14 +317,12 @@ def _audit_pdf(path: Path, mode: str) -> dict:
     except ImportError as exc:
         raise RuntimeError("处理 PDF 需要 pypdf") from exc
     reader = PdfReader(path)
-    sizes = []
-    for page in reader.pages:
-        sizes.append((float(page.mediabox.width), float(page.mediabox.height)))
+    sizes = [(float(page.mediabox.width), float(page.mediabox.height)) for page in reader.pages]
     issues = []
     for number, (width, height) in enumerate(sizes, 1):
         if abs(width - A4_WIDTH_PT) > PAGE_TOLERANCE_PT or abs(height - A4_HEIGHT_PT) > PAGE_TOLERANCE_PT:
             issues.append(f"第 {number} 页不是 A4 尺寸：{width:.1f}×{height:.1f} pt")
-    page_report = audit_page_texts(_pdf_page_texts(path), mode=mode)
+    page_report = audit_page_texts(_pdf_page_texts_from_bytes(path.read_bytes()), mode=mode)
     issues.extend(page_report["issues"])
     return {
         "path": str(path),
@@ -225,14 +331,15 @@ def _audit_pdf(path: Path, mode: str) -> dict:
         "page_report": page_report,
         "issues": issues,
         "warnings": page_report["warnings"],
-        "passed": not issues and path.stat().st_size <= MAX_FILE_SIZE,
+        "passed": not issues,
     }
 
 
 def _scan_pdf_submission_anonymity(path: Path, mode: str, terms: Iterable[str]) -> dict:
-    pages = _pdf_page_texts(path)
+    pages = _pdf_page_texts_from_bytes(path.read_bytes())
     start = 2 if mode == "paper" else 0
-    needles = tuple(dict.fromkeys(_norm(t) for t in (*DEFAULT_TERMS, *terms) if t.strip()))
+    raw_terms = [str(t) for t in (*DEFAULT_TERMS, *terms) if str(t).strip()]
+    needles = tuple(dict.fromkeys(_norm(t) for t in raw_terms))
     hits = []
     scanned = []
     for page_number, text in enumerate(pages[start:], start + 1):
@@ -246,8 +353,10 @@ def validate_paper(path: Path, *, mode: str = "paper", terms: Iterable[str] = ()
     if not source.is_file() or source.suffix.casefold() != ".pdf":
         raise FileNotFoundError(f"提交论文必须是 PDF 文件：{source}")
     report = _audit_pdf(source, mode)
-    if source.stat().st_size > MAX_FILE_SIZE:
-        report["issues"].append(f"文件大小 {source.stat().st_size} bytes，超过 20 MB")
+    # The 20 MB limit is an electronic-submission limit.  The paper PDF is an
+    # intermediate rendering and may be larger before PDF optimization.
+    if mode == "electronic" and source.stat().st_size > MAX_FILE_SIZE:
+        report["issues"].append(f"电子版文件大小 {source.stat().st_size} bytes，超过 20 MB")
     anonymity = _scan_pdf_submission_anonymity(source, mode, terms)
     report["anonymity"] = anonymity
     if anonymity["hits"]:
@@ -257,13 +366,17 @@ def validate_paper(path: Path, *, mode: str = "paper", terms: Iterable[str] = ()
 
 
 def export_electronic(source: Path, output: Path, *, terms: Iterable[str] = (), overwrite: bool = False) -> dict:
-    source = source.resolve(); output = output.resolve()
+    source = source.resolve()
+    output = output.resolve()
     if source == output:
         raise ValueError("电子版输出不能覆盖输入 PDF")
     if not source.is_file() or source.suffix.casefold() != ".pdf":
         raise FileNotFoundError(f"输入纸质版 PDF 不存在：{source}")
     if output.exists() and not overwrite:
         raise FileExistsError(f"输出已存在，未覆盖：{output}")
+    source_report = validate_paper(source, mode="paper", terms=terms)
+    if not source_report["passed"]:
+        raise ValueError("纸质版 PDF 未通过导出前检查：" + "；".join(source_report["issues"]))
     try:
         from pypdf import PdfReader, PdfWriter
     except ImportError as exc:
@@ -285,36 +398,57 @@ def export_electronic(source: Path, output: Path, *, terms: Iterable[str] = (), 
             temporary.unlink()
     report = validate_paper(output, mode="electronic", terms=terms)
     report["removed_pages"] = [1, 2]
+    if not report["passed"] and output.exists():
+        output.unlink()
     return report
 
 
+def _support_arcname(path: Path, supplied: Path) -> str:
+    supplied = supplied.resolve()
+    if supplied.is_file():
+        return supplied.name
+    return f"{supplied.name}/{path.relative_to(supplied).as_posix()}"
+
+
 def package_support(inputs: Iterable[Path], output: Path, *, terms: Iterable[str] = (), overwrite: bool = False) -> dict:
+    """Create a ZIP support package with a stable relative-path manifest."""
     output = output.resolve()
+    if output.suffix.casefold() != ".zip":
+        raise ValueError("当前实现生成 ZIP；请将支撑材料输出文件命名为 .zip")
     if output.exists() and not overwrite:
         raise FileExistsError(f"输出已存在，未覆盖：{output}")
-    files = []
-    for path in _iter_files(inputs):
-        if path.resolve() == output:
-            continue
-        relative = path.name if path.is_file() else path.relative_to(path.parent).as_posix()
-        name = path.name.casefold()
-        if any(term.casefold() in name for term in (*COMMITMENT_TERMS, *NUMBER_PAGE_TERMS)):
-            continue
-        files.append((path, relative))
-    # Rebuild relative names with stable source-directory prefixes where possible.
-    files = [(path, f"{path.parent.name}/{path.name}") for path, _ in files]
+
+    files: list[tuple[Path, str]] = []
+    seen: set[str] = set()
+    for supplied in inputs:
+        supplied = supplied.resolve()
+        for path in _iter_files([supplied]):
+            if path == output:
+                continue
+            if any(term.casefold() in path.name.casefold() for term in (*COMMITMENT_TERMS, *NUMBER_PAGE_TERMS)):
+                continue
+            arcname = _support_arcname(path, supplied)
+            if arcname in seen:
+                raise ValueError(f"支撑材料归档路径冲突：{arcname}")
+            seen.add(arcname)
+            files.append((path, arcname))
+
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(f".{output.name}.tmp")
     try:
         with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for path, arcname in sorted(files, key=lambda pair: pair[1].casefold()):
                 archive.write(path, arcname)
-            manifest = "支撑材料文件列表\n" + "\n".join(f"- {arcname}" for _, arcname in files) + "\n"
-            archive.writestr("支撑材料文件列表.txt", manifest.encode("utf-8"))
+            manifest_lines = ["支撑材料文件列表", ""]
+            manifest_lines.extend(f"- {arcname}" for _, arcname in sorted(files, key=lambda pair: pair[1].casefold()))
+            if not files:
+                manifest_lines.append("- （无；如确实无支撑材料，可不提交本 ZIP）")
+            archive.writestr("支撑材料文件列表.txt", ("\n".join(manifest_lines) + "\n").encode("utf-8"))
         os.replace(temporary, output)
     finally:
         if temporary.exists():
             temporary.unlink()
+
     anonymity = scan_anonymity([output], terms)
     issues = []
     if output.stat().st_size > MAX_FILE_SIZE:
@@ -322,28 +456,35 @@ def package_support(inputs: Iterable[Path], output: Path, *, terms: Iterable[str
     if anonymity["hits"]:
         issues.append(f"支撑材料匿名检查命中 {len(anonymity['hits'])} 项敏感信息")
     return {
-        "path": str(output), "size_bytes": output.stat().st_size,
-        "files": [arcname for _, arcname in files], "anonymity": anonymity,
-        "issues": issues, "passed": not issues,
+        "path": str(output),
+        "size_bytes": output.stat().st_size,
+        "files": [arcname for _, arcname in sorted(files, key=lambda pair: pair[1].casefold())],
+        "anonymity": anonymity,
+        "issues": issues,
+        "passed": not issues,
     }
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="2026 CUMCM 论文提交检查工具")
     commands = parser.add_subparsers(dest="action", required=True)
-    scan = commands.add_parser("scan-anonymity")
+    scan = commands.add_parser("scan-anonymity", help="扫描论文、代码、数据或 ZIP 中的身份信息")
     scan.add_argument("paths", nargs="+", type=Path)
     scan.add_argument("--term", action="append", default=[])
-    validate = commands.add_parser("validate-paper")
+    validate = commands.add_parser("validate-paper", help="检查纸质版或电子版 PDF")
     validate.add_argument("path", type=Path)
     validate.add_argument("--mode", choices=("paper", "electronic"), default="paper")
     validate.add_argument("--term", action="append", default=[])
-    export = commands.add_parser("export-electronic")
-    export.add_argument("source", type=Path); export.add_argument("output", type=Path)
-    export.add_argument("--term", action="append", default=[]); export.add_argument("--overwrite", action="store_true")
-    package = commands.add_parser("package-support")
-    package.add_argument("output", type=Path); package.add_argument("inputs", nargs="+", type=Path)
-    package.add_argument("--term", action="append", default=[]); package.add_argument("--overwrite", action="store_true")
+    export = commands.add_parser("export-electronic", help="删除纸质版 PDF 前两页并检查电子版")
+    export.add_argument("source", type=Path)
+    export.add_argument("output", type=Path)
+    export.add_argument("--term", action="append", default=[])
+    export.add_argument("--overwrite", action="store_true")
+    package = commands.add_parser("package-support", help="生成 ≤20 MB 的 ZIP 支撑材料包")
+    package.add_argument("output", type=Path)
+    package.add_argument("inputs", nargs="+", type=Path)
+    package.add_argument("--term", action="append", default=[])
+    package.add_argument("--overwrite", action="store_true")
     return parser
 
 

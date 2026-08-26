@@ -143,7 +143,7 @@ class PaperFormatTests(unittest.TestCase):
 
         self.assertFalse(any("未在正文引用" in issue for issue in issues))
 
-    def test_rendered_page_limits_distinguish_target_from_official_maximum(self):
+    def test_total_rendered_pages_do_not_replace_cumcm_body_page_limit(self):
         doc = self._front_matter()
 
         issues = pf.validate_paper_structure(
@@ -156,7 +156,24 @@ class PaperFormatTests(unittest.TestCase):
             rendered_pages=31,
         )
 
-        self.assertTrue(any("官方上限" in issue and "30" in issue for issue in issues))
+        self.assertFalse(any("官方上限" in issue for issue in issues))
+        self.assertTrue(any("正文页数上限" in issue for issue in issues))
+
+    def test_body_page_limit_is_checked_when_body_pages_are_supplied(self):
+        doc = self._front_matter()
+
+        issues = pf.validate_paper_structure(
+            doc,
+            contest="cumcm",
+            min_content_units=0,
+            min_equations=0,
+            min_figures=0,
+            min_tables=0,
+            rendered_pages=35,
+            body_pages=31,
+        )
+
+        self.assertTrue(any("正文页数 31 页" in issue and "30" in issue for issue in issues))
 
     def test_safe_save_rejects_skill_root(self):
         doc = self._front_matter()
