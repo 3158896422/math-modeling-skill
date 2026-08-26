@@ -52,7 +52,6 @@ APPENDIX_RE = re.compile(r"\\appendix\b|\\begin\s*\{appendices\}")
 QUALITY_DEFAULTS = {
     "cumcm": {
         "min_content_units": 15_000,
-        "min_pages": 20,
         "min_equations": 5,
         "min_figures": 8,
         "min_tables": 3,

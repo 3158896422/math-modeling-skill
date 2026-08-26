@@ -129,6 +129,27 @@ python scripts/comment.py "<PROJECT_ROOT>/unpacked" 0 "批注意见"
 python scripts/comment.py "<PROJECT_ROOT>/unpacked" 1 "回复意见" --parent 0
 ```
 
+## CUMCM 纸质版与电子版提交
+
+2026 年全国大学生数学建模竞赛要求纸质版第 1 页为承诺书、第 2 页为编号专用页、第 3 页为摘要专用页、第 4 页起为正文，不要目录；摘要原则上不超过 1 页，正文不超过 30 页；附录在正文之后。电子版只保留一个 PDF 或 Word 文件且建议 PDF：必须删除承诺书和编号专用页，使摘要成为第 1 页，大小不超过 20 MB。支撑材料压缩为一个 RAR/ZIP，不超过 20 MB，并包含文件清单；所有论文和支撑材料都不得出现姓名、学校、赛区、参赛编号等身份信息。
+
+全国赛生成时必须使用用户提供的当届官方模板。内置模板只是构建基线，不能声称符合官方提交规范；没有官方模板时报告 `BLOCKED` 并记录模板来源缺失。
+
+渲染完整 PDF 后运行提交合规检查：
+
+```powershell
+python scripts/cumcm_submission.py validate-paper "<PROJECT_ROOT>/完整论文-纸质版.pdf" --mode paper --term "真实姓名" --term "真实学校"
+python scripts/cumcm_submission.py export-electronic "<PROJECT_ROOT>/完整论文-纸质版.pdf" "<PROJECT_ROOT>/完整论文.pdf" --overwrite
+```
+
+打包支撑材料并生成包内清单（ZIP 已满足官方 RAR/ZIP 要求）：
+
+```powershell
+python scripts/cumcm_submission.py package-support "<PROJECT_ROOT>/支撑材料.zip" "<PROJECT_ROOT>/code" "<PROJECT_ROOT>/results" --term "真实学校" --overwrite
+```
+
+匿名扫描默认检查常见通用词；真实姓名、真实学校和赛区名必须用 `--term` 显式提供。自动扫描不能识别全部真实身份信息，最终仍须人工复核。
+
 ## 必做验证
 
 ```powershell
@@ -139,4 +160,4 @@ python scripts/paper_format.py validate "<PROJECT_ROOT>/完整论文.docx" --con
 python scripts/equations.py verify-conversion "<PROJECT_ROOT>/完整论文.docx"
 ```
 
-`verify-conversion` 仅适用于由本工具的 Pandoc 转换生成、带 `.conversion.json` 的 DOCX；直接由 `paper_format.py` 构建时省略。`paper_format.py validate` 输出结构化指标，并在官方前置结构、篇幅质量目标、公式/图/表数量、图表编号与正文引用、参考文献双向对应或实际页数任一不满足时返回非零退出码。所有竞赛默认至少 8 幅图；CUMCM 默认的 15000 字词单位和约 20 页只是质量目标。以 2026 年官方规范为例，正文不超过 30 页才是硬约束。只有当届官方规则或用户明确要求允许偏离时才能调整目标并记录依据。结构校验后，把 DOCX 渲染成 PDF 或图片抽检分页、公式、表格、图片、页眉页脚和字体替换。
+`verify-conversion` 仅适用于由本工具的 Pandoc 转换生成、带 `.conversion.json` 的 DOCX；直接由 `paper_format.py` 构建时省略。`paper_format.py validate` 输出结构化指标，把篇幅、公式/图/表数量不足归为“预警”类质量目标；图表编号与正文引用、参考文献双向对应等完整性问题仍阻断交付。所有竞赛默认至少 8 幅图；CUMCM 默认的约 15000 字词单位、约 20 页、5 个公式、8 幅图和 3 个表都是可按题目调整的质量目标，不是官方最低数量。以 2026 年官方规范为例，摘要原则上不超过 1 页、正文不超过 30 页才是硬约束。只有当届官方规则或用户明确要求允许偏离时才能调整目标并记录依据。结构校验后，把 DOCX 渲染成完整 PDF，再执行上节纸质版/电子版提交检查和人工版面抽检。

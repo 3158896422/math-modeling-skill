@@ -45,6 +45,11 @@ class ContestProfile:
     margins: tuple[float, float, float, float]
     required_markers: tuple[str, ...]
     rules_source: str
+    abstract_max_pages: int | None = None
+    body_max_pages: int | None = None
+    requires_official_template: bool = False
+    allow_table_of_contents: bool = True
+    quality_targets: tuple[tuple[str, int], ...] = ()
 
 
 CONTEST_PROFILES = {
@@ -54,6 +59,11 @@ CONTEST_PROFILES = {
         margins=(2.54, 2.54, 3.18, 3.18),
         required_markers=("摘 要", "关键词："),
         rules_source="http://www.mcm.edu.cn/",
+        abstract_max_pages=1,
+        body_max_pages=30,
+        requires_official_template=True,
+        allow_table_of_contents=False,
+        quality_targets=(("content_units", 15000), ("pages", 20), ("equations", 5), ("figures", 8), ("tables", 3)),
     ),
     "mcm-icm": ContestProfile(
         name="MCM/ICM",
@@ -63,6 +73,36 @@ CONTEST_PROFILES = {
         rules_source="https://www.comap.com/contests/mcm-icm",
     ),
 }
+
+
+def quality_warnings(issues: list[str]) -> list[str]:
+    """Return author-side quality warnings, not official rule failures."""
+    return [issue for issue in issues if issue.startswith("预警：")]
+
+
+def official_errors(issues: list[str]) -> list[str]:
+    """Return structural/reference issues treated as blocking errors.
+
+    Reference-list gaps are completeness warnings in this helper; callers can
+    still use the raw issue list when a contest requires bidirectional checks.
+    """
+    return [
+        issue for issue in issues
+        if not issue.startswith("预警：") and "未找到参考文献章节" not in issue
+    ]
+
+
+def profile_constraints(contest="cumcm") -> dict:
+    """Return official constraints separately from author-side quality targets."""
+    profile = get_profile(contest)
+    return {
+        "abstract_max_pages": profile.abstract_max_pages,
+        "body_max_pages": profile.body_max_pages,
+        "requires_official_template": profile.requires_official_template,
+        "allow_table_of_contents": profile.allow_table_of_contents,
+        "quality_targets": dict(profile.quality_targets),
+        "rules_source": profile.rules_source,
+    }
 
 
 def get_profile(contest="cumcm"):
@@ -495,7 +535,9 @@ def validate_document(path, *, contest="cumcm", rendered_pages=None):
             "tables": len(doc.tables),
         },
         "issues": issues,
-        "passed": not issues,
+        "warnings": [issue for issue in issues if issue.startswith("预警：")],
+        "errors": [issue for issue in issues if not issue.startswith("预警：")],
+        "passed": not any(not issue.startswith("预警：") for issue in issues),
     }
 
 
