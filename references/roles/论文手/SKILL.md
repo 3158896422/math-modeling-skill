@@ -98,3 +98,9 @@ python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" validate "<PROJECT_ROOT
 | 阶段内独立验收 | `../../../references/Subagent调度.md` |
 
 内部分析表、核对清单和临时 Markdown 不作为交付物。
+
+## Markdown 公式写法
+
+论文草稿、证据大纲和其他 Markdown 中的数学公式统一使用 VS Code 预览兼容的
+`$...$`（行内）或单独成行的 `$$...$$`（行间）。禁止使用 `\(...\)`、`\[...\]`
+作为 Markdown 公式分隔符；仅在复制到 `.tex` 源码时按 LaTeX 模板要求使用原生语法。

@@ -64,6 +64,18 @@ class SubagentProtocolTests(unittest.TestCase):
         self.assertIn("同时生成两种格式时再检查 Word/LaTeX 一致性", protocol)
         self.assertIn("同时生成两种格式时再检查 Word/LaTeX 一致性", writing)
 
+    def test_markdown_math_uses_vscode_compatible_delimiters(self):
+        root = read("SKILL.md")
+        modeling = read("references/roles/建模手/SKILL.md")
+        writing = read("references/roles/论文手/SKILL.md")
+        for text in (root, modeling, writing):
+            self.assertIn("$...$", text)
+            self.assertIn("$$...$$", text)
+            self.assertIn("禁止使用", text)
+        self.assertIn("VS Code Markdown 预览", root)
+        self.assertIn("不改变 `.tex` 源码", modeling)
+        self.assertIn("复制到 `.tex` 源码", writing)
+
 
 if __name__ == "__main__":
     unittest.main()
