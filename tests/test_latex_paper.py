@@ -565,7 +565,7 @@ $$c=3$$
                 stale = inspect_paper(main, pdf_path=pdf)
             self.assertTrue(any("源码哈希" in issue for issue in stale["issues"]))
 
-    def test_cumcm_page_limit_counts_body_without_abstract_or_appendix(self):
+    def test_cumcm_page_limit_counts_total_rendered_pages(self):
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary)
             root = parent / "project"
@@ -615,8 +615,10 @@ $$c=3$$
             with patch("latex_paper._audit_pdf", return_value=audit):
                 report = inspect_paper(main, pdf_path=pdf, max_pages=30)
 
+            self.assertEqual(report["rendered_pages"], 35)
             self.assertEqual(report["body_pages"], 30)
-            self.assertFalse(any("超过官方上限" in issue for issue in report["issues"]))
+            self.assertEqual(report["page_limit_scope"], "total")
+            self.assertTrue(any("论文总页数 35" in issue and "30" in issue for issue in report["issues"]))
 
     def test_appendix_page_argument_requires_appendix_source(self):
         with tempfile.TemporaryDirectory() as temporary:

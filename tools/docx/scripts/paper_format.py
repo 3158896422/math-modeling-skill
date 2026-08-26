@@ -47,6 +47,7 @@ class ContestProfile:
     rules_source: str
     abstract_max_pages: int | None = None
     body_max_pages: int | None = None
+    total_max_pages: int | None = None
     requires_official_template: bool = False
     allow_table_of_contents: bool = True
     quality_targets: tuple[tuple[str, int], ...] = ()
@@ -61,6 +62,7 @@ CONTEST_PROFILES = {
         rules_source="http://www.mcm.edu.cn/",
         abstract_max_pages=1,
         body_max_pages=30,
+        total_max_pages=30,
         requires_official_template=True,
         allow_table_of_contents=False,
         quality_targets=(("content_units", 15000), ("pages", 20), ("equations", 5), ("figures", 8), ("tables", 3)),
@@ -98,6 +100,7 @@ def profile_constraints(contest="cumcm") -> dict:
     return {
         "abstract_max_pages": profile.abstract_max_pages,
         "body_max_pages": profile.body_max_pages,
+        "total_max_pages": profile.total_max_pages,
         "requires_official_template": profile.requires_official_template,
         "allow_table_of_contents": profile.allow_table_of_contents,
         "quality_targets": dict(profile.quality_targets),
@@ -405,9 +408,15 @@ def validate_paper_structure(
     body_pages=None,
     target_pages=None,
     official_max_pages=None,
+    total_max_pages=None,
     require_rendered_pages=True,
 ):
-    """检查官方结构、篇幅目标、公式图表、编号引用和参考文献对应关系。"""
+    """检查官方结构、总页数门槛、公式图表、编号引用和参考文献对应关系。
+
+    `rendered_pages` 是渲染 PDF 的完整页数。CUMCM 默认把完整论文总页数
+    （纸质版包含承诺书和编号专用页，电子版按实际交稿文件计）限制为 30 页；
+    `body_pages` 仅作为诊断指标保留，不再替代总页数门槛。
+    """
     profile = get_profile(contest)
     texts = [paragraph.text.strip() for paragraph in doc.paragraphs if paragraph.text.strip()]
     errors = []
@@ -435,12 +444,8 @@ def validate_paper_structure(
         min_figures = 8 if min_figures is None else min_figures
         min_tables = 3 if min_tables is None else min_tables
         target_pages = 20 if target_pages is None else target_pages
-        # CUMCM limits the body, not the complete rendered PDF.  The DOCX
-        # helper only receives a total page count unless the caller supplies
-        # body_pages; final fixed-page/appendix accounting belongs to
-        # cumcm_submission.py.
-        if official_max_pages is None and body_pages is not None:
-            official_max_pages = 30
+        if total_max_pages is None:
+            total_max_pages = profile.total_max_pages
     else:
         min_content_units = 0 if min_content_units is None else min_content_units
         min_equations = 0 if min_equations is None else min_equations
@@ -479,14 +484,13 @@ def validate_paper_structure(
                 f"预警：渲染后共 {rendered_pages} 页，低于约 {target_pages} 页质量目标；"
                 "该目标不是官方最低页数"
             )
-        if contest.lower() == "cumcm" and body_pages is None:
+        if total_max_pages is not None and rendered_pages > total_max_pages:
             errors.append(
-                "预警：未提供正文页数，不能用完整 PDF 总页数代替 CUMCM 的正文页数上限；"
-                "请在渲染 PDF 后运行 cumcm_submission.py"
+                f"论文总页数 {rendered_pages} 页，超过 Skill 当前总页数上限 {total_max_pages} 页"
             )
-        elif official_max_pages is not None and body_pages > official_max_pages:
+        if official_max_pages is not None and body_pages is not None and body_pages > official_max_pages:
             errors.append(
-                f"正文页数 {body_pages} 页，超过当前核验的官方上限 {official_max_pages} 页"
+                f"正文页数 {body_pages} 页，超过配置上限 {official_max_pages} 页"
             )
     return errors
 
@@ -561,7 +565,7 @@ def main():
     validate.add_argument("path", type=Path)
     validate.add_argument("--contest", choices=sorted(CONTEST_PROFILES), default="cumcm")
     validate.add_argument("--rendered-pages", type=int, required=True)
-    validate.add_argument("--body-pages", type=int, default=None, help="渲染 PDF 中正文页数；CUMCM 不把总页数当正文页数")
+    validate.add_argument("--body-pages", type=int, default=None, help="可选：渲染 PDF 中正文页数，仅作诊断统计")
     arguments = parser.parse_args()
     result = validate_document(
         arguments.path,

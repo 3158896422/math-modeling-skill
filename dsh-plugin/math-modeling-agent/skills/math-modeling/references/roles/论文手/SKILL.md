@@ -39,7 +39,7 @@ description: 根据题目、建模分析和真实代码结果生成完整 Word �
 
 在生成前明确竞赛名称、届次、语言和官方规则来源。官方结构、页型、页边距、摘要页、页数、编号和提交格式均以当届规则为准。
 
-同时明确两类要求：官方硬约束与可调整质量目标。2026 年全国赛硬约束包括摘要原则上不超过 1 页、正文不超过 30 页、纸质版承诺书/编号专用页/摘要专用页/正文顺序且无目录、电子版删除前两页、提交文件和支撑材料均不超过 20 MB、全文匿名；这些必须核验。约 15000 字词单位、约 20 页、5 公式、8 图、3 表只是可按题目调整的质量目标，低于目标只能作为完整度预警，不能写成官方最低数量或冒充官方违规。全国赛必须使用当届官方模板；没有模板时报告阻塞。
+同时明确两类要求：官方硬约束与可调整质量目标。摘要页、纸质版固定页面、电子版删页、文件大小、匿名和官方正文页数口径必须按当届规则核验；本 Skill 另外设置完整渲染 PDF 总页数不超过 30 页的默认输出门槛，正文页数仍单独记录为诊断指标。约 15000 字词单位、约 20 页、5 公式、8 图、3 表只是可按题目调整的质量目标，低于目标只能作为完整度预警，不能写成官方最低数量或冒充官方违规。全国赛必须使用当届官方模板；没有模板时报告阻塞。
 
 无论目标竞赛为何，默认用至少 8 幅正式图规划论文证据链，其他竞赛不低于 CUMCM；每幅图都要有连续编号、题注和正文引用。当届官方规则或用户明确要求与此冲突时，以其要求为准并记录依据。
 
@@ -76,10 +76,10 @@ python "<SKILL_ROOT>/tools/docx/scripts/equations.py" verify-conversion "<PROJEC
 ```powershell
 python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" doctor --engine xelatex --bibliography-backend <none|bibtex|biber> --need-pandoc
 python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" build "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" --engine xelatex --publish "<PROJECT_ROOT>/完整论文.pdf"
-python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" validate "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" --pdf "<PROJECT_ROOT>/完整论文.pdf" --contest cumcm --quality-checks --questions q1 q2 q3 --min-image-dpi 300 --max-pages <当届官方正文上限> --body-start-page <正文起始页> --appendix-start-page <附录起始页>
+python "<SKILL_ROOT>/tools/latex/scripts/latex_paper.py" validate "<PROJECT_ROOT>/完整论文-LaTeX/main.tex" --pdf "<PROJECT_ROOT>/完整论文.pdf" --contest cumcm --quality-checks --questions q1 q2 q3 --min-image-dpi 300 --max-pages 30 --body-start-page <正文起始页> --appendix-start-page <附录起始页>
 ```
 
-根据目标竞赛、实际子问题和官方模板替换 `contest`、`--questions`、引擎、参考文献后端、正文起始页、附录起始页及正文页数上限；没有附录时省略 `--appendix-start-page`。复制权威代码或图表到 LaTeX 项目后，先按 LaTeX 工具说明执行 `bind`，再编译和校验。构建警告默认阻断 `完整论文.pdf` 发布；只有已核对警告才能同时提供 `--allow-warning` 与 `--override-reason`。降低默认质量目标也必须通过 `--override-reason` 记录官方条款或用户要求。任一命令退出码非零即回到论文构建步骤修正；缺少运行环境即明确报告阻塞，不得交付未通过版本。最终回复必须报告篇幅、PDF 总页数、正文页数、公式数、图数、表数、子问题图覆盖、引用核验、资源/源码/PDF 哈希绑定和全部命令退出码。
+根据目标竞赛、实际子问题和官方模板替换 `contest`、`--questions`、引擎、参考文献后端、正文起始页、附录起始页及页数参数；CUMCM 的 `--max-pages` 默认使用完整渲染 PDF 总页数门槛 30，若当届规则或用户要求不同则显式传入并记录依据；没有附录时省略 `--appendix-start-page`。
 
 上述命令只完成作者侧技术校验，不替代 `W2` 独立验收。
 
@@ -93,7 +93,7 @@ python "<SKILL_ROOT>/tools/docx/scripts/cumcm_submission.py" export-electronic "
 python "<SKILL_ROOT>/tools/docx/scripts/cumcm_submission.py" package-support "<PROJECT_ROOT>/支撑材料.zip" "<PROJECT_ROOT>/code" "<PROJECT_ROOT>/results" --term "<真实姓名>" --term "<真实学校>" --term "<真实赛区>" --overwrite
 ```
 
-第一条检查纸质版第 1–3 页固定页面、第 4 页正文起始、摘要≤1页、正文≤30页、摘要页起连续页码、A4 和匿名；第二条只有在纸质版通过后才删除前两页，并复核电子版首页摘要、A4、正文边界、匿名和 20 MB；第三条生成保留相对路径的 ZIP 文件清单，并扫描文件名、文本、DOCX/PDF/XLSX 成员的敏感信息和 20 MB 大小。若确实无支撑材料，允许不生成 ZIP，但附录必须明确注明“本论文没有支撑材料”。自动文本抽取或页码识别失败时报告阻塞，不能把人工未核验的文件声称为通过。
+第一条检查纸质版第 1–3 页固定页面、第 4 页正文起始、摘要≤1页、完整渲染 PDF 总页数≤30页（Skill 输出门槛；正文页数另按官方规则核对）、摘要页起连续页码、A4 和匿名；第二条只有在纸质版通过后才删除前两页，并复核电子版首页摘要、A4、正文边界、匿名和 20 MB；第三条生成保留相对路径的 ZIP 文件清单，并扫描文件名、文本、DOCX/PDF/XLSX 成员的敏感信息和 20 MB 大小。若确实无支撑材料，允许不生成 ZIP，但附录必须明确注明“本论文没有支撑材料”。自动文本抽取或页码识别失败时报告阻塞，不能把人工未核验的文件声称为通过。
 
 ## 何时加载
 
@@ -116,3 +116,9 @@ python "<SKILL_ROOT>/tools/docx/scripts/cumcm_submission.py" package-support "<P
 论文草稿、证据大纲和其他 Markdown 中的数学公式统一使用 VS Code 预览兼容的
 `$...$`（行内）或单独成行的 `$$...$$`（行间）。禁止使用 `\(...\)`、`\[...\]`
 作为 Markdown 公式分隔符；仅在复制到 `.tex` 源码时按 LaTeX 模板要求使用原生语法。
+
+## 本 Skill 的输出页数与代码归档门槛
+
+- **总页数门槛**：完成 DOCX/LaTeX 渲染后，以实际 PDF 页数为准，CUMCM 默认要求完整论文总页数不超过 30 页。纸质版检查包含承诺书、编号专用页、摘要、正文和附录；电子版删除前两页后，按实际电子版 PDF 再检查。正文页数仍单独记录，用于与当届官方规则核对和诊断，不得把“正文页数”替换成默认总页数门槛的文字表述。
+- **代码归档**：完整编程代码不粘贴到论文末尾，也不在论文附录中逐文件展开。将可运行源程序、运行环境/依赖、运行命令、输入输出清单和必要中间结果放入一个不超过 20 MB 的支撑材料 ZIP（需要 RAR 时可用外部工具生成）；论文附录只保留支撑材料文件列表、复现说明和必要中间结果。
+- **规则边界**：上述 30 页总页数和代码归档方式是本 Skill/用户指定的输出策略，严格于或不同于部分竞赛官方规则。正式参赛前必须人工核对当届官方公告、模板和提交须知；若官方要求不同，以当届官方要求为准并记录调整依据。

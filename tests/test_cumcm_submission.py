@@ -57,13 +57,22 @@ class CumcmSubmissionTests(unittest.TestCase):
             self.assertTrue(any("第 1 页未检测到承诺书" in issue for issue in report["issues"]))
             self.assertTrue(any("第 3 页未检测到摘要" in issue for issue in report["issues"]))
 
-    def test_body_more_than_30_pages_fails(self):
+    def test_total_more_than_30_pages_fails(self):
         texts = ["承诺书", "编号专用页", "摘要", *(f"正文第{i}页" for i in range(1, 32)), "附录"]
         with tempfile.TemporaryDirectory() as tmp:
             pdf = Path(tmp) / "long.pdf"
             _write_pdf(pdf, texts)
             report = cs.validate_paper(pdf, mode="paper")
-        self.assertTrue(any("超过官方上限 30 页" in issue for issue in report["issues"]))
+        self.assertTrue(any("论文总页数 35" in issue and "30 页" in issue for issue in report["issues"]))
+        self.assertEqual(report["page_report"]["total_pages"], 35)
+        self.assertEqual(report["page_report"]["max_total_pages"], 30)
+
+    def test_total_page_limit_accepts_exactly_30_pages(self):
+        pages = ["承诺书", "编号专用页", "摘要", "正文起始页"] + [f"正文第{i}页" for i in range(2, 28)]
+        report = cs.audit_page_texts(pages, mode="paper")
+        self.assertEqual(report["total_pages"], 30)
+        self.assertEqual(report["max_total_pages"], 30)
+        self.assertFalse(any("超过 Skill 当前总页数上限" in issue for issue in report["issues"]))
 
     def test_export_electronic_removes_commitment_and_number_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -147,6 +156,7 @@ class QualityTargetSemanticsTests(unittest.TestCase):
         constraints = pf.profile_constraints("cumcm")
         self.assertEqual(constraints["abstract_max_pages"], 1)
         self.assertEqual(constraints["body_max_pages"], 30)
+        self.assertEqual(constraints["total_max_pages"], 30)
         self.assertTrue(constraints["requires_official_template"])
         self.assertFalse(constraints["allow_table_of_contents"])
         self.assertEqual(

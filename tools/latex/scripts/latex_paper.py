@@ -1008,6 +1008,9 @@ def inspect_paper(
         if not matched:
             issues.append(f"子问题 {question} 缺少正式结果图（label 应以 fig:{question}- 开头）")
 
+    if contest == "cumcm" and max_pages is None:
+        max_pages = 30
+
     threshold_values, threshold_overrides = _thresholds(
         contest,
         quality_checks,
@@ -1127,11 +1130,13 @@ def inspect_paper(
     minimum_pages = threshold_values["min_pages"]
     if rendered_pages is not None and minimum_pages and rendered_pages < minimum_pages:
         issues.append(f"预警：实际页数 {rendered_pages}，低于质量目标 {minimum_pages}")
-    if max_pages is not None:
-        if contest == "cumcm" and body_pages is not None and body_pages > max_pages:
-            issues.append(f"正文页数 {body_pages}，超过官方上限 {max_pages}")
-        elif contest != "cumcm" and rendered_pages is not None and rendered_pages > max_pages:
-            issues.append(f"PDF 总页数 {rendered_pages}，超过官方上限 {max_pages}")
+    if max_pages is not None and rendered_pages is not None and rendered_pages > max_pages:
+        if contest == "cumcm":
+            issues.append(
+                f"论文总页数 {rendered_pages}，超过 Skill 当前总页数上限 {max_pages}"
+            )
+        else:
+            issues.append(f"PDF 总页数 {rendered_pages}，超过配置上限 {max_pages}")
 
     return {
         "main_tex": str(main),
@@ -1140,7 +1145,7 @@ def inspect_paper(
         "source_sha256": source_hash,
         "rendered_pages": rendered_pages,
         "body_pages": body_pages,
-        "page_limit_scope": "body" if contest == "cumcm" else "total",
+        "page_limit_scope": "total",
         "pdf_audit": pdf_audit,
         "build_manifest": build_manifest,
         "thresholds": threshold_values,

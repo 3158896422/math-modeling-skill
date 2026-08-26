@@ -238,13 +238,27 @@ def _extract_page_number(text: str) -> int | None:
     return None
 
 
-def audit_page_texts(page_texts: list[str], *, mode: str = "paper", max_body_pages: int = 30) -> dict:
-    """Audit fixed pages, abstract/body boundary, appendix and page numbering."""
+def audit_page_texts(
+    page_texts: list[str],
+    *,
+    mode: str = "paper",
+    max_body_pages: int | None = None,
+    max_total_pages: int = 30,
+) -> dict:
+    """Audit fixed pages, total-page limit, appendix boundary and page numbering.
+
+    The total-page limit is a Skill output gate and is intentionally stricter
+    than the 2026 official body-only wording.
+    """
     issues: list[str] = []
     warnings: list[str] = []
     if mode not in {"paper", "electronic"}:
         raise ValueError("mode 必须是 paper 或 electronic")
     pages = len(page_texts)
+    if max_total_pages is not None and pages > max_total_pages:
+        issues.append(
+            f"论文总页数 {pages}，超过 Skill 当前总页数上限 {max_total_pages} 页"
+        )
     if mode == "paper":
         if pages < 4:
             issues.append("纸质版至少需要 4 页：承诺书、编号专用页、摘要页和正文起始页")
@@ -285,8 +299,8 @@ def audit_page_texts(page_texts: list[str], *, mode: str = "paper", max_body_pag
         issues.append("附录出现在正文起始页之前")
     body_end = appendix_start or pages + 1
     body_pages = max(0, body_end - body_start) if body_start <= body_end else 0
-    if body_pages > max_body_pages:
-        issues.append(f"正文页数 {body_pages}，超过官方上限 {max_body_pages} 页")
+    if max_body_pages is not None and body_pages > max_body_pages:
+        issues.append(f"正文页数 {body_pages}，超过配置上限 {max_body_pages} 页")
 
     page_numbers = [_extract_page_number(text) for text in page_texts]
     numbered_pages = page_numbers[abstract_page - 1:]
@@ -300,6 +314,8 @@ def audit_page_texts(page_texts: list[str], *, mode: str = "paper", max_body_pag
     return {
         "mode": mode,
         "pages": pages,
+        "total_pages": pages,
+        "max_total_pages": max_total_pages,
         "abstract_page": abstract_page,
         "body_start_page": body_start,
         "appendix_start_page": appendix_start,
