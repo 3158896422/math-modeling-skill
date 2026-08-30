@@ -27,8 +27,9 @@ class SubagentProtocolTests(unittest.TestCase):
         programming = read("references/roles/编程手/SKILL.md")
         writing = read("references/roles/论文手/SKILL.md")
 
-        for text in (root, modeling, programming, writing):
-            self.assertIn("通用建模证据与验证契约", text)
+        self.assertIn("通用建模证据与验证契约", root)
+        for text in (modeling, programming, writing):
+            self.assertIn("通用建模证据与验证.md", text)
         for text in (contract, dispatch, modeling, programming, writing):
             self.assertIn("模型合同", text)
         for token in ("合理基线", "信息时序", "分层验证", "适用边界"):
