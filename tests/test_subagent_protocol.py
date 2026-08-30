@@ -19,6 +19,24 @@ class SubagentProtocolTests(unittest.TestCase):
         for gate in ("M1", "P1", "P2", "W1", "W2"):
             self.assertIn(gate, text)
 
+    def test_evidence_contract_is_routed_through_all_stages(self):
+        root = read("SKILL.md")
+        contract = read("references/通用建模证据与验证.md")
+        dispatch = read("references/Subagent调度.md")
+        modeling = read("references/roles/建模手/SKILL.md")
+        programming = read("references/roles/编程手/SKILL.md")
+        writing = read("references/roles/论文手/SKILL.md")
+
+        for text in (root, modeling, programming, writing):
+            self.assertIn("通用建模证据与验证契约", text)
+        for text in (contract, dispatch, modeling, programming, writing):
+            self.assertIn("模型合同", text)
+        for token in ("合理基线", "信息时序", "分层验证", "适用边界"):
+            self.assertIn(token, contract)
+        self.assertIn("题型匹配", dispatch)
+        self.assertIn("数量不能替代验证", programming)
+        self.assertIn("证据强度", writing)
+
     def test_role_entries_require_independent_review(self):
         roles = {
             "references/roles/建模手/SKILL.md": ("M1",),
