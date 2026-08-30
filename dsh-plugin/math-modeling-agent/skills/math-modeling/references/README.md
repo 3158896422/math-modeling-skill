@@ -22,6 +22,7 @@
 | 任务 | 读取 |
 |---|---|
 | 选模型 | `roles/建模手/references/建模设计理论.md` |
+| 建立模型合同、设计基线和通用验证 | `通用建模证据与验证.md` |
 | 查具体算法 | `算法索引.md`，再读取一个匹配的 `../assets/*.md` |
 | Python/MATLAB 实现 | `roles/编程手/references/工作流程.md` |
 | MATLAB 工具箱与出图 | `roles/编程手/references/MATLAB规范.md` |
